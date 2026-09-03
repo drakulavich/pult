@@ -95,8 +95,11 @@ if (rl?.five_hour || rl?.seven_day) {
     const pct = num(w?.used_percentage);
     if (pct === null) return null;
     const resets = num(w?.resets_at);
+    // Judge the number the line prints, not the one behind it: a window at 49.6
+    // reads "50%", and a 50% that renders green with no reset time is a lie.
     // A reset time is only worth its width once the window is close enough to bite.
-    return byLevel(pct, `${label} ${Math.round(pct)}%`) + (resets && pct >= YELLOW ? dim(` ↻${until(resets)}`) : "");
+    const shown = Math.round(pct);
+    return byLevel(shown, `${label} ${shown}%`) + (resets && shown >= YELLOW ? dim(` ↻${until(resets)}`) : "");
   };
   parts.push([seg("5h", rl.five_hour), seg("7d", rl.seven_day)].filter(Boolean).join(dim(" · ")));
 }

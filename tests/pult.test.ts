@@ -128,10 +128,10 @@ describe("pult", () => {
   test("hides the reset time while a rate-limit window is still green", async () => {
     const { out, code } = await render({
       model: { display_name: "Opus" },
-      rate_limits: { five_hour: { used_percentage: 24, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+      rate_limits: { five_hour: { used_percentage: 49, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
     });
     expect(code).toBe(0);
-    expect(out).toContain("5h 24%");
+    expect(out).toContain("5h 49%");
     expect(out).not.toContain("↻");
   });
 
@@ -142,6 +142,16 @@ describe("pult", () => {
     });
     expect(code).toBe(0);
     expect(out).toMatch(/5h 50% ↻2h0\d/);
+  });
+
+  test("judges a window by the percentage it prints, not the one behind it", async () => {
+    const { out, raw, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { five_hour: { used_percentage: 49.6, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+    });
+    expect(code).toBe(0);
+    expect(out).toMatch(/5h 50% ↻2h0\d/);
+    expect(raw).toContain("\x1b[33m");
   });
 
   // The wrapper is what settings.json names, so each branch of it is covered here:
