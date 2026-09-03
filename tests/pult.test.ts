@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, symlinkSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -42,21 +42,52 @@ describe("pult", () => {
     }
   });
 
-  test("the wrapper finds pult.ts through a symlink, from any cwd", async () => {
-    const link = join(mkdtempSync(join(tmpdir(), "pult-")), "pult");
-    symlinkSync(wrapper, link);
-    const proc = Bun.spawn([link], {
-      cwd: tmpdir(),
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      // No profile is sourced for a status line: only bun's own dir is on PATH.
-      env: { HOME: process.env.HOME ?? "", PATH: `${dirname(process.execPath)}:/usr/bin:/bin` },
-    });
+  // The wrapper is what settings.json names, so each branch of it is covered here:
+  // it runs outside any shell profile, where PATH and the clone's location vary.
+  const temps: string[] = [];
+  const temp = (prefix: string) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    temps.push(dir);
+    return dir;
+  };
+  afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
+  async function wrap(bin: string, env: Record<string, string>): Promise<{ out: string; code: number }> {
+    const proc = Bun.spawn([bin], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
     proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" } }));
     proc.stdin.end();
     const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
-    expect(await proc.exited).toBe(0);
+    return { out, code: await proc.exited };
+  }
+
+  const onPath = { HOME: process.env.HOME ?? "", PATH: `${dirname(process.execPath)}:/usr/bin:/bin` };
+
+  test("the wrapper finds pult.ts through a symlink, from any cwd", async () => {
+    const link = join(temp("pult-link-"), "pult");
+    symlinkSync(wrapper, link);
+    const { out, code } = await wrap(link, onPath);
+    expect(code).toBe(0);
     expect(out).toContain("Opus");
+  });
+
+  test("the wrapper finds a bun that is not on PATH", async () => {
+    const home = temp("pult-home-");
+    mkdirSync(join(home, ".bun", "bin"), { recursive: true });
+    symlinkSync(process.execPath, join(home, ".bun", "bin", "bun"));
+    const { out, code } = await wrap(wrapper, { HOME: home, PATH: "/usr/bin:/bin" });
+    expect(code).toBe(0);
+    expect(out).toContain("Opus");
+  });
+
+  test("the wrapper says what is missing instead of failing", async () => {
+    const orphan = join(temp("pult-orphan-"), "pult");
+    copyFileSync(wrapper, orphan);
+    const { out, code } = await wrap(orphan, onPath);
+    expect(code).toBe(0);
+    expect(out).toContain("pult.ts not found");
+
+    const { out: noBun, code: noBunCode } = await wrap(wrapper, { HOME: temp("pult-nobun-"), PATH: "/usr/bin:/bin" });
+    expect(noBunCode).toBe(0);
+    expect(noBun).toContain("bun not found");
   });
 });
