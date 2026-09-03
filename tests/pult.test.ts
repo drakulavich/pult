@@ -22,11 +22,14 @@ describe("pult", () => {
       workspace: { current_dir: "/tmp", repo: { name: "kesha-voice-kit" } },
       cost: { total_cost_usd: 4.2137, total_duration_ms: 5_400_000, total_lines_added: 156, total_lines_removed: 23 },
       context_window: { context_window_size: 1_000_000, used_percentage: 41, current_usage: { input_tokens: 8500, cache_creation_input_tokens: 5000, cache_read_input_tokens: 400_000 } },
-      rate_limits: { five_hour: { used_percentage: 23.5, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+      rate_limits: {
+        five_hour: { used_percentage: 23.5, resets_at: Math.floor(Date.now() / 1000) + 7800 },
+        seven_day: { used_percentage: 81, resets_at: Math.floor(Date.now() / 1000) + 299_970 },
+      },
       pr: { number: 1150, review_state: "pending" },
     });
     expect(code).toBe(0);
-    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% ↻2h0\d │ kesha-voice-kit(:\S+)? │ PR #1150 pending$/);
+    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻83h\d\d │ kesha-voice-kit(:\S+)? │ PR #1150 pending$/);
   });
 
   test("leaves absent sections out instead of printing placeholders", async () => {
@@ -118,6 +121,27 @@ describe("pult", () => {
     expect(raw.trimEnd().split("\n")).toHaveLength(1);
     expect(out).not.toContain("NaN");
     expect(out).not.toContain("+");
+  });
+
+  // A reset time only matters once a window is close enough to bite, so it rides
+  // the same yellow threshold the color does.
+  test("hides the reset time while a rate-limit window is still green", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { five_hour: { used_percentage: 24, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("5h 24%");
+    expect(out).not.toContain("↻");
+  });
+
+  test("shows the reset time from the moment a window turns yellow", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { five_hour: { used_percentage: 50, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+    });
+    expect(code).toBe(0);
+    expect(out).toMatch(/5h 50% ↻2h0\d/);
   });
 
   // The wrapper is what settings.json names, so each branch of it is covered here:
