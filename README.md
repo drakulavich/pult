@@ -9,7 +9,7 @@
 <p align="center"><b>One line of status under your Claude Code prompt.</b><br>Model, context, spend, rate limits, repo and branch — read from the session JSON Claude Code already pipes you, printed in about 65 ms.</p>
 
 <p align="center">
-  <img src="https://github.com/drakulavich/pult/raw/main/docs/assets/statusline.png" alt="pult rendering a status line: model, context percentage and tokens, cost and duration, lines changed, both rate-limit windows, repo and branch" width="900">
+  <img src="docs/assets/statusline.png" alt="pult rendering a status line: model, context percentage and tokens, cost and duration, lines changed, both rate-limit windows, repo and branch" width="900">
 </p>
 
 A busier session fills in the rest — a reset time once a window has gone yellow, and the pull request you are on:
