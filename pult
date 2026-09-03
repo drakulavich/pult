@@ -13,8 +13,11 @@ dir=$(cd -P "$(dirname "$src")" && pwd)
 
 # The status line runs outside any shell profile, so bun may not be on PATH.
 bun=$(command -v bun 2>/dev/null)
-for c in "${BUN_INSTALL:-$HOME/.bun}/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun \
-         /home/linuxbrew/.linuxbrew/bin/bun; do
+# Empty in normal use; a test points $PULT_SYSROOT at a tree with no bun to reach this branch.
+for c in "${BUN_INSTALL:-$HOME/.bun}/bin/bun" \
+         "${PULT_SYSROOT-}/opt/homebrew/bin/bun" \
+         "${PULT_SYSROOT-}/usr/local/bin/bun" \
+         "${PULT_SYSROOT-}/home/linuxbrew/.linuxbrew/bin/bun"; do
   [ -n "$bun" ] && break
   [ -x "$c" ] && bun=$c
 done

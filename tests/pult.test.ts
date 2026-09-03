@@ -198,7 +198,12 @@ describe("pult", () => {
     expect(code).toBe(0);
     expect(out).toContain("pult.ts not found");
 
-    const { out: noBun, code: noBunCode } = await wrap(wrapper, { HOME: temp("pult-nobun-"), PATH: "/usr/bin:/bin" });
+    // Without PULT_SYSROOT this arm asserts nothing on a machine that has /opt/homebrew/bin/bun.
+    const { out: noBun, code: noBunCode } = await wrap(wrapper, {
+      HOME: temp("pult-nobun-"),
+      PATH: "/usr/bin:/bin",
+      PULT_SYSROOT: temp("pult-sysroot-"),
+    });
     expect(noBunCode).toBe(0);
     expect(noBun).toContain("bun not found");
   });

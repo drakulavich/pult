@@ -16,7 +16,7 @@ There is no build, no lint, and no dependency install — Bun runs `pult.ts` dir
 
 Two files do the work:
 
-- `pult` — POSIX `sh` wrapper, the entry point named in `settings.json` (as `~/.claude/pult/pult`; Claude Code runs `command` through a shell, so `~` expands). It resolves its own symlink chain to locate `pult.ts` beside it, and falls back to `$BUN_INSTALL/bin`, `~/.bun/bin`, Homebrew and `/usr/local/bin` when `bun` is not on `PATH`. Both exist so no user's absolute paths end up in the install: the clone may live anywhere, and a status line runs outside any shell profile, where `bun` is often absent from `PATH`.
+- `pult` — POSIX `sh` wrapper, the entry point named in `settings.json` (as `~/.claude/pult/pult`; Claude Code runs `command` through a shell, so `~` expands). It resolves its own symlink chain to locate `pult.ts` beside it, and falls back to `$BUN_INSTALL/bin`, `~/.bun/bin`, Homebrew and `/usr/local/bin` when `bun` is not on `PATH`. Both exist so no user's absolute paths end up in the install: the clone may live anywhere, and a status line runs outside any shell profile, where `bun` is often absent from `PATH`. `$PULT_SYSROOT` prefixes the three absolute fallbacks and is empty in normal use; it exists because no `HOME` or `PATH` override can hide a real `/opt/homebrew/bin/bun`, so without it the "bun not found" branch is untestable on a Mac and passes in CI only because Linux runners happen to lack those paths.
 - `pult.ts` — reads the session JSON on stdin, appends each populated section to `parts`, and prints `parts.join(" │ ")`. One pass, top to bottom, no framework.
 
 Constraints that shape the code:
