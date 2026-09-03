@@ -9,7 +9,7 @@
 <p align="center"><b>One line of status under your Claude Code prompt.</b><br>Model, context, spend, rate limits, repo and branch — read from the session JSON Claude Code already pipes you, printed in about 65 ms.</p>
 
 ```
-Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% ↻2h09 · 7d 81% ↻83h19 │ kesha-voice-kit:main │ PR #1150 pending
+Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 81% ↻83h19 │ kesha-voice-kit:main │ PR #1150 pending
 ```
 
 - **Everything on one row** — nothing wraps, nothing scrolls, and sections you have no data for are simply absent
@@ -63,7 +63,7 @@ Left to right, with the payload field each section comes from. The fields are do
 | `ctx 41% 414k/1.0M` | `context_window` | Uses `used_percentage` when the payload has it, otherwise adds up `current_usage` against the window size |
 | `$4.21 · 1h30` | `cost.total_cost_usd`, `total_duration_ms` | |
 | `+156/-23` | `cost.total_lines_added`, `total_lines_removed` | Hidden when both are zero |
-| `5h 24% ↻2h09` | `rate_limits.five_hour`, `seven_day` | `↻` is the time until the window resets |
+| `5h 24% · 7d 81% ↻83h19` | `rate_limits.five_hour`, `seven_day` | The `↻` reset time appears once a window has gone yellow, so a quiet session shows percentages alone |
 | `pult:main*` | `workspace.repo.name`, then git | Repo name, or the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
 | `(wt review)` | `worktree.name`, `workspace.git_worktree` | |
 | `PR #1150 pending` | `pr.number`, `pr.review_state` | |

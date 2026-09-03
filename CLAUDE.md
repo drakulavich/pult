@@ -25,7 +25,7 @@ Constraints that shape the code:
 - **Absent means omitted.** Every field of `Payload` is optional and comes from an upstream schema (<https://code.claude.com/docs/en/statusline>) that can gain or drop keys. Missing data drops its whole section rather than rendering a placeholder or a zero.
 - **Cheap.** It re-runs every `refreshInterval` seconds. `git()` is the only subprocess; keep it that way.
 
-Color goes through `byLevel`, which is the single place the yellow-at-50 / red-at-80 thresholds live.
+The `YELLOW` and `RED` constants are the single place the 50 / 80 thresholds live. `byLevel` colors by them, and the rate-limit segment reads `YELLOW` too: a reset time is only printed once its window has gone yellow.
 
 Two helpers hold the payload boundary, and every field must come through one of them: `num()` for a field typed `number`, `str()` for one typed `string`. Both return `null` for anything else, because the type only describes what the sender promised — a `number` arrives as JSON `null`, a string, or `NaN` serialised to null, and a `string` arrives as a number. `str()` also strips control characters, because a directory can be named with an escape sequence or a newline and the status line renders each printed line as its own row. Reading a payload field directly is the bug these two exist to prevent.
 

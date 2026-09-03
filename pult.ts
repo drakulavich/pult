@@ -22,7 +22,10 @@ const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
-const byLevel = (pct: number, s: string) => (pct >= 80 ? red(s) : pct >= 50 ? yellow(s) : green(s));
+// The two thresholds the whole line reads from: what turns yellow, and what turns red.
+const YELLOW = 50;
+const RED = 80;
+const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW ? yellow(s) : green(s));
 
 // A field typed number can arrive as null, a string, or absent; only a real number renders.
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -92,7 +95,11 @@ if (rl?.five_hour || rl?.seven_day) {
     const pct = num(w?.used_percentage);
     if (pct === null) return null;
     const resets = num(w?.resets_at);
-    return byLevel(pct, `${label} ${Math.round(pct)}%`) + (resets ? dim(` ↻${until(resets)}`) : "");
+    // Judge the number the line prints, not the one behind it: a window at 49.6
+    // reads "50%", and a 50% that renders green with no reset time is a lie.
+    // A reset time is only worth its width once the window is close enough to bite.
+    const shown = Math.round(pct);
+    return byLevel(shown, `${label} ${shown}%`) + (resets && shown >= YELLOW ? dim(` ↻${until(resets)}`) : "");
   };
   parts.push([seg("5h", rl.five_hour), seg("7d", rl.seven_day)].filter(Boolean).join(dim(" · ")));
 }
