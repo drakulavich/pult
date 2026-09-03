@@ -1,6 +1,6 @@
 # pult
 
-A one-line status line for Claude Code. Reads the session JSON Claude Code pipes to a `statusLine` command and prints one line: model, context usage, cost and duration, lines changed, rate limits with time to reset, repo and branch, worktree, pull request. No dependencies beyond Bun; ~35 ms per render.
+A one-line status line for Claude Code. Reads the session JSON Claude Code pipes to a `statusLine` command and prints one line: model, context usage, cost and duration, lines changed, rate limits with time to reset, repo and branch, worktree, pull request. No dependencies beyond Bun; ~65 ms per render.
 
 ```
 Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% ↻2h09 · 7d 81% ↻83h19 │ kesha-voice-kit:main │ PR #1150 pending
@@ -26,7 +26,7 @@ Then in `~/.claude/settings.json`:
 }
 ```
 
-That is the whole install, for any user on macOS, Linux, or Windows with Git Bash. Claude Code runs the `command` through a shell, so the `~` expands to your home directory; clone somewhere else and the command is just that path instead.
+That is the whole install on macOS and Linux. Claude Code runs the `command` through a shell, so the `~` expands to your home directory; clone somewhere else and the command is just that path instead. On Windows, Claude Code routes the command through Git Bash, which should run the wrapper unchanged — untested.
 
 Two things happen inside the `pult` wrapper so that nothing else has to be spelled out:
 
@@ -38,7 +38,7 @@ Two things happen inside the `pult` wrapper so that nothing else has to be spell
 The fields are the ones documented at <https://code.claude.com/docs/en/statusline>. Anything absent from the payload is left out of the line rather than rendered as a placeholder. Try it by hand:
 
 ```sh
-echo '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":12,"context_window_size":200000}}' | bun pult.ts
+echo '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":12,"context_window_size":200000}}' | ./pult
 ```
 
 ## Test

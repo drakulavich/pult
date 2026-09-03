@@ -20,4 +20,6 @@ for c in "${BUN_INSTALL:-$HOME/.bun}/bin/bun" /opt/homebrew/bin/bun /usr/local/b
 done
 [ -n "$bun" ] || { printf '\033[2mstatusline: bun not found (install it from bun.sh)\033[0m\n'; exit 0; }
 
+[ -f "$dir/pult.ts" ] || { printf '\033[2mstatusline: pult.ts not found beside %s\033[0m\n' "$src"; exit 0; }
+
 exec "$bun" "$dir/pult.ts" "$@"
