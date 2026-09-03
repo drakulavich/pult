@@ -6,12 +6,13 @@ import { dirname, join, resolve } from "node:path";
 const script = resolve(import.meta.dir, "..", "pult.ts");
 const wrapper = resolve(import.meta.dir, "..", "pult");
 
-async function render(payload: unknown): Promise<{ out: string; code: number }> {
+async function render(payload: unknown): Promise<{ out: string; raw: string; code: number }> {
   const proc = Bun.spawn(["bun", script], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   proc.stdin.write(typeof payload === "string" ? payload : JSON.stringify(payload));
   proc.stdin.end();
-  const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
-  return { out, code: await proc.exited };
+  const raw = await new Response(proc.stdout).text();
+  const out = raw.replace(/\x1b\[[0-9;]*m/g, "");
+  return { out, raw, code: await proc.exited };
 }
 
 describe("pult", () => {
@@ -40,6 +41,83 @@ describe("pult", () => {
       expect(code).toBe(0);
       expect(out).toContain("no payload");
     }
+  });
+
+  // Every field arrives from an upstream JSON schema, so "optional" in the type
+  // is not a guarantee of type at runtime: JSON says null, and keys can change.
+  test("drops a cost that is not a number instead of crashing", async () => {
+    for (const total_cost_usd of [null, "4.21"]) {
+      const { out, code } = await render({ model: { display_name: "Opus" }, cost: { total_cost_usd } });
+      expect(code).toBe(0);
+      expect(out).toContain("Opus");
+      expect(out).not.toContain("$");
+    }
+  });
+
+  test("treats a null payload as no payload", async () => {
+    const { out, code } = await render("null");
+    expect(code).toBe(0);
+    expect(out).toContain("no payload");
+  });
+
+  test("drops a percentage that is not a number instead of printing NaN", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { five_hour: { used_percentage: "x" } },
+      context_window: { used_percentage: "y", context_window_size: 200_000 },
+    });
+    expect(code).toBe(0);
+    expect(out).not.toContain("NaN");
+    expect(out).not.toContain("5h");
+  });
+
+  test("strips control characters out of the names it renders", async () => {
+    const { raw, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: "/tmp", repo: { name: "\x1b[2J\x1b[Hpwned\nsecond row" } },
+    });
+    expect(code).toBe(0);
+    expect(raw.trimEnd().split("\n")).toHaveLength(1);
+    expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).not.toContain("\x1b");
+  });
+
+  test("survives a name that arrives as something other than a string", async () => {
+    const { out, code } = await render({
+      model: { display_name: 5, id: 6 },
+      cwd: 42,
+      workspace: { current_dir: 43, repo: { name: 7 } },
+      worktree: { name: 8 },
+      agent: { name: 9 },
+      pr: { number: "10", review_state: 11 },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("?");
+    expect(out).not.toContain("agent");
+    expect(out).not.toContain("PR #");
+  });
+
+  test("strips control characters out of every field it renders, not just names", async () => {
+    const { out, raw, code } = await render({
+      model: { display_name: "Opus" },
+      effort: { level: "low\nsecond row" },
+      pr: { number: "7\x1b[2J\x1b[Hpwned\nsecond row" },
+    });
+    expect(code).toBe(0);
+    expect(raw.trimEnd().split("\n")).toHaveLength(1);
+    expect(out).toContain("lowsecond row");
+    expect(out).not.toContain("PR #");
+  });
+
+  test("drops usage counts that are not numbers instead of printing NaN", async () => {
+    const { out, raw, code } = await render({
+      model: { display_name: "Opus" },
+      context_window: { current_usage: { input_tokens: "x" }, context_window_size: "y" },
+      cost: { total_lines_added: "5\nsecond row" },
+    });
+    expect(code).toBe(0);
+    expect(raw.trimEnd().split("\n")).toHaveLength(1);
+    expect(out).not.toContain("NaN");
+    expect(out).not.toContain("+");
   });
 
   // The wrapper is what settings.json names, so each branch of it is covered here:

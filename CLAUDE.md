@@ -27,6 +27,8 @@ Constraints that shape the code:
 
 Color goes through `byLevel`, which is the single place the yellow-at-50 / red-at-80 thresholds live.
 
+Two helpers hold the payload boundary, and every field must come through one of them: `num()` for a field typed `number`, `str()` for one typed `string`. Both return `null` for anything else, because the type only describes what the sender promised — a `number` arrives as JSON `null`, a string, or `NaN` serialised to null, and a `string` arrives as a number. `str()` also strips control characters, because a directory can be named with an escape sequence or a newline and the status line renders each printed line as its own row. Reading a payload field directly is the bug these two exist to prevent.
+
 ## Tests
 
 `tests/pult.test.ts` spawns the real script and strips ANSI before asserting, so tests read as the user's line. The main test pins the full rendered line as one regex — changing field order or separators means updating that regex deliberately.
