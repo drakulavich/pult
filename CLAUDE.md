@@ -27,6 +27,8 @@ Constraints that shape the code:
 
 Color goes through `byLevel`, which is the single place the yellow-at-50 / red-at-80 thresholds live.
 
+Two helpers hold the payload boundary, and new fields should go through them: `num()` accepts only a finite number, because a field typed `number` arrives as whatever the sender put there — JSON `null`, a string, `NaN` serialised to null. `plain()` strips control characters from every name that reaches the terminal, because a directory can be named with an escape sequence or a newline, and the status line renders each printed line as its own row.
+
 ## Tests
 
 `tests/pult.test.ts` spawns the real script and strips ANSI before asserting, so tests read as the user's line. The main test pins the full rendered line as one regex — changing field order or separators means updating that regex deliberately.
