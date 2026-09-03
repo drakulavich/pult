@@ -90,4 +90,4 @@ The tests spawn the real script and strip ANSI before asserting, so they read th
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Made with ❤️ and 🥤 energy under [MIT License](LICENSE)
