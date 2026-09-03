@@ -81,6 +81,45 @@ describe("pult", () => {
     expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).not.toContain("\x1b");
   });
 
+  test("survives a name that arrives as something other than a string", async () => {
+    const { out, code } = await render({
+      model: { display_name: 5, id: 6 },
+      cwd: 42,
+      workspace: { current_dir: 43, repo: { name: 7 } },
+      worktree: { name: 8 },
+      agent: { name: 9 },
+      pr: { number: "10", review_state: 11 },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("?");
+    expect(out).not.toContain("agent");
+    expect(out).not.toContain("PR #");
+  });
+
+  test("strips control characters out of every field it renders, not just names", async () => {
+    const { out, raw, code } = await render({
+      model: { display_name: "Opus" },
+      effort: { level: "low\nsecond row" },
+      pr: { number: "7\x1b[2J\x1b[Hpwned\nsecond row" },
+    });
+    expect(code).toBe(0);
+    expect(raw.trimEnd().split("\n")).toHaveLength(1);
+    expect(out).toContain("lowsecond row");
+    expect(out).not.toContain("PR #");
+  });
+
+  test("drops usage counts that are not numbers instead of printing NaN", async () => {
+    const { out, raw, code } = await render({
+      model: { display_name: "Opus" },
+      context_window: { current_usage: { input_tokens: "x" }, context_window_size: "y" },
+      cost: { total_lines_added: "5\nsecond row" },
+    });
+    expect(code).toBe(0);
+    expect(raw.trimEnd().split("\n")).toHaveLength(1);
+    expect(out).not.toContain("NaN");
+    expect(out).not.toContain("+");
+  });
+
   // The wrapper is what settings.json names, so each branch of it is covered here:
   // it runs outside any shell profile, where PATH and the clone's location vary.
   const temps: string[] = [];

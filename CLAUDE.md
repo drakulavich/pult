@@ -27,7 +27,7 @@ Constraints that shape the code:
 
 Color goes through `byLevel`, which is the single place the yellow-at-50 / red-at-80 thresholds live.
 
-Two helpers hold the payload boundary, and new fields should go through them: `num()` accepts only a finite number, because a field typed `number` arrives as whatever the sender put there — JSON `null`, a string, `NaN` serialised to null. `plain()` strips control characters from every name that reaches the terminal, because a directory can be named with an escape sequence or a newline, and the status line renders each printed line as its own row.
+Two helpers hold the payload boundary, and every field must come through one of them: `num()` for a field typed `number`, `str()` for one typed `string`. Both return `null` for anything else, because the type only describes what the sender promised — a `number` arrives as JSON `null`, a string, or `NaN` serialised to null, and a `string` arrives as a number. `str()` also strips control characters, because a directory can be named with an escape sequence or a newline and the status line renders each printed line as its own row. Reading a payload field directly is the bug these two exist to prevent.
 
 ## Tests
 
