@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdtempSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 const script = resolve(import.meta.dir, "..", "pult.ts");
+const wrapper = resolve(import.meta.dir, "..", "pult");
 
 async function render(payload: unknown): Promise<{ out: string; code: number }> {
   const proc = Bun.spawn(["bun", script], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
@@ -37,5 +40,23 @@ describe("pult", () => {
       expect(code).toBe(0);
       expect(out).toContain("no payload");
     }
+  });
+
+  test("the wrapper finds pult.ts through a symlink, from any cwd", async () => {
+    const link = join(mkdtempSync(join(tmpdir(), "pult-")), "pult");
+    symlinkSync(wrapper, link);
+    const proc = Bun.spawn([link], {
+      cwd: tmpdir(),
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      // No profile is sourced for a status line: only bun's own dir is on PATH.
+      env: { HOME: process.env.HOME ?? "", PATH: `${dirname(process.execPath)}:/usr/bin:/bin` },
+    });
+    proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" } }));
+    proc.stdin.end();
+    const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
+    expect(await proc.exited).toBe(0);
+    expect(out).toContain("Opus");
   });
 });
