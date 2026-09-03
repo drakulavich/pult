@@ -26,8 +26,9 @@ const byLevel = (pct: number, s: string) => (pct >= 80 ? red(s) : pct >= 50 ? ye
 
 // A field typed number can arrive as null, a string, or absent; only a real number renders.
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-// Names reach the terminal verbatim, and a directory may be named with escapes or a newline.
-const plain = (s: string) => s.replace(/[\x00-\x1f\x7f]/g, "");
+// Same for a field typed string, and what does render reaches the terminal verbatim,
+// so control characters go: a directory may be named with an escape sequence or a newline.
+const str = (v: unknown): string | null => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : null);
 
 const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
 const dur = (ms: number) => {
@@ -44,7 +45,7 @@ const git = (cwd: string): string | null => {
   const branch = run("rev-parse", "--abbrev-ref", "HEAD");
   if (!branch) return null;
   const dirty = run("status", "--porcelain", "--untracked-files=no");
-  return plain(branch + (dirty ? "*" : ""));
+  return str(branch + (dirty ? "*" : ""));
 };
 
 let p: Payload = {};
@@ -59,17 +60,19 @@ try {
 
 const parts: string[] = [];
 
-const model = plain(p.model?.display_name ?? p.model?.id ?? "?");
-const flags = [p.fast_mode ? "fast" : null, p.effort?.level && p.effort.level !== "high" ? p.effort.level : null].filter(Boolean).join(",");
+const model = str(p.model?.display_name) ?? str(p.model?.id) ?? "?";
+const effort = str(p.effort?.level);
+const flags = [p.fast_mode ? "fast" : null, effort && effort !== "high" ? effort : null].filter(Boolean).join(",");
 parts.push(bold(cyan(model)) + (flags ? dim(` ${flags}`) : ""));
 
 const cw = p.context_window;
 if (cw) {
   const u = cw.current_usage;
-  const used = u ? (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) : null;
-  const pct = num(cw.used_percentage) ?? (used && cw.context_window_size ? Math.round((100 * used) / cw.context_window_size) : 0);
-  const size = cw.context_window_size ? `/${k(cw.context_window_size)}` : "";
-  parts.push(byLevel(pct, `ctx ${pct}%`) + dim(used !== null ? ` ${k(used)}${size}` : size));
+  const used = u ? (num(u.input_tokens) ?? 0) + (num(u.cache_creation_input_tokens) ?? 0) + (num(u.cache_read_input_tokens) ?? 0) : null;
+  const size = num(cw.context_window_size);
+  const pct = num(cw.used_percentage) ?? (used && size ? Math.round((100 * used) / size) : 0);
+  const suffix = size ? `/${k(size)}` : "";
+  parts.push(byLevel(pct, `ctx ${pct}%`) + dim(used !== null ? ` ${k(used)}${suffix}` : suffix));
 }
 
 if (p.cost) {
@@ -78,7 +81,9 @@ if (p.cost) {
   const ms = num(c.total_duration_ms);
   const bits = [cost !== null ? `$${cost.toFixed(2)}` : null, ms ? dur(ms) : null].filter(Boolean);
   if (bits.length) parts.push(bits.join(dim(" · ")));
-  if (c.total_lines_added || c.total_lines_removed) parts.push(green(`+${c.total_lines_added ?? 0}`) + dim("/") + red(`-${c.total_lines_removed ?? 0}`));
+  const added = num(c.total_lines_added) ?? 0;
+  const removed = num(c.total_lines_removed) ?? 0;
+  if (added || removed) parts.push(green(`+${added}`) + dim("/") + red(`-${removed}`));
 }
 
 const rl = p.rate_limits;
@@ -92,13 +97,18 @@ if (rl?.five_hour || rl?.seven_day) {
   parts.push([seg("5h", rl.five_hour), seg("7d", rl.seven_day)].filter(Boolean).join(dim(" · ")));
 }
 
-const cwd = p.workspace?.current_dir ?? p.cwd ?? process.cwd();
-const repo = plain(p.workspace?.repo?.name ?? cwd.split("/").pop() ?? "");
+const cwd = str(p.workspace?.current_dir) ?? str(p.cwd) ?? process.cwd();
+const repo = str(p.workspace?.repo?.name) ?? cwd.split("/").pop() ?? "";
 const branch = git(cwd);
-const wt = p.worktree?.name ?? p.workspace?.git_worktree;
-parts.push(dim(repo) + (branch ? dim(":") + branch : "") + (wt ? dim(` (wt ${plain(wt)})`) : ""));
+const wt = str(p.worktree?.name) ?? str(p.workspace?.git_worktree);
+parts.push(dim(repo) + (branch ? dim(":") + branch : "") + (wt ? dim(` (wt ${wt})`) : ""));
 
-if (p.pr?.number) parts.push(`PR #${p.pr.number}` + (p.pr.review_state ? dim(` ${plain(p.pr.review_state)}`) : ""));
-if (p.agent?.name) parts.push(dim(`agent ${plain(p.agent.name)}`));
+const prNumber = num(p.pr?.number);
+if (prNumber) {
+  const state = str(p.pr?.review_state);
+  parts.push(`PR #${prNumber}` + (state ? dim(` ${state}`) : ""));
+}
+const agent = str(p.agent?.name);
+if (agent) parts.push(dim(`agent ${agent}`));
 
 console.log(parts.join(dim(" │ ")));
