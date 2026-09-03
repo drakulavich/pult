@@ -3,6 +3,7 @@
 <p align="center">
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun" alt="Bun"></a>
   <a href="https://code.claude.com/docs/en/statusline"><img src="https://img.shields.io/badge/Claude%20Code-statusLine-d97757" alt="Claude Code statusLine"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 <p align="center"><b>One line of status under your Claude Code prompt.</b><br>Model, context, spend, rate limits, repo and branch — read from the session JSON Claude Code already pipes you, printed in about 65 ms.</p>
@@ -86,3 +87,7 @@ bun test -t "survives an empty"   # one test by name
 ```
 
 The tests spawn the real script and strip ANSI before asserting, so they read the way your line does. They cover the wrapper too, since that is the part `settings.json` actually names.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
