@@ -1,0 +1,25 @@
+#!/bin/sh
+# Claude Code statusLine entry point: finds bun, runs pult.ts from this script's
+# own directory, so settings.json needs no path baked into it beyond this file's.
+
+# Follow symlinks by hand: BSD readlink has no -f on older macOS.
+src=$0
+while [ -L "$src" ]; do
+  dir=$(cd -P "$(dirname "$src")" && pwd)
+  src=$(readlink "$src")
+  case $src in /*) ;; *) src=$dir/$src ;; esac
+done
+dir=$(cd -P "$(dirname "$src")" && pwd)
+
+# The status line runs outside any shell profile, so bun may not be on PATH.
+bun=$(command -v bun 2>/dev/null)
+for c in "${BUN_INSTALL:-$HOME/.bun}/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun \
+         /home/linuxbrew/.linuxbrew/bin/bun; do
+  [ -n "$bun" ] && break
+  [ -x "$c" ] && bun=$c
+done
+[ -n "$bun" ] || { printf '\033[2mstatusline: bun not found (install it from bun.sh)\033[0m\n'; exit 0; }
+
+[ -f "$dir/pult.ts" ] || { printf '\033[2mstatusline: pult.ts not found beside %s\033[0m\n' "$src"; exit 0; }
+
+exec "$bun" "$dir/pult.ts" "$@"
