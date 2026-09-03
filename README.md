@@ -53,6 +53,39 @@ Claude Code reads that at startup, so the line appears in your next session. It 
 
 Windows routes the command through Git Bash and should run the wrapper unchanged. Nobody has tried it.
 
+## Codex CLI
+
+Codex CLI has its own native status line. It does not invoke Pult or send a
+Claude Code-style JSON payload, so Pult cannot replace the Codex footer.
+
+To configure the closest native equivalent:
+
+1. Start an interactive Codex session with `codex`.
+2. Enter `/statusline`.
+3. Select the Codex-provided items you want. Codex saves that selection in its
+   own user configuration.
+
+The [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+documents `tui.status_line` in `~/.codex/config.toml` as an ordered list of
+Codex-provided footer-item identifiers. Use `/statusline` instead of copying an
+identifier list from Pult: Codex owns which items are available and what they
+mean. Pult never changes this configuration file.
+
+| Pult / Claude Code value | Codex native equivalent | Notes |
+|---|---|---|
+| Model and reasoning effort | Model | Native equivalent |
+| Context window | Context | Native equivalent |
+| Repository and branch | Project / branch summary | Native equivalent when available |
+| Pull request | Open PR | Native equivalent when available |
+| Changed lines | Committed branch changes | Similar, not the current dirty diff |
+| Estimated cost | Estimated thread cost | Enterprise-only and may be unavailable |
+| 5-hour / 7-day limits | Usage limits | Account-dependent semantics and availability |
+| Agent or worktree name | None | No documented equivalent |
+
+Pult does not read `~/.codex` session data, scrape the TUI, modify
+`~/.codex/config.toml`, or use `notify` or hooks to imitate a Codex status-line
+renderer.
+
 ### Why there is a wrapper
 
 `pult` is a small shell script, and it exists so that no absolute path of yours ends up in the install:
