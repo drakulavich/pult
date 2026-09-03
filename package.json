@@ -1,6 +1,22 @@
 {
   "name": "pult",
   "private": true,
+  "description": "One line of status under your Claude Code prompt: model, context, spend, rate limits, repo, branch, PR.",
+  "license": "MIT",
+  "author": "Anton Yakutovich",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drakulavich/pult.git"
+  },
+  "keywords": [
+    "claude-code",
+    "statusline",
+    "bun",
+    "typescript",
+    "cli",
+    "terminal",
+    "developer-tools"
+  ],
   "type": "module",
   "scripts": {
     "test": "bun test"
