@@ -1,6 +1,7 @@
 <h1 align="center">pult</h1>
 
 <p align="center">
+  <a href="https://github.com/drakulavich/pult/actions/workflows/test.yml"><img src="https://github.com/drakulavich/pult/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun" alt="Bun"></a>
   <a href="https://code.claude.com/docs/en/statusline"><img src="https://img.shields.io/badge/Claude%20Code-statusLine-d97757" alt="Claude Code statusLine"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
