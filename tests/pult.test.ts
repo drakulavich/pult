@@ -191,20 +191,38 @@ describe("pult", () => {
     expect(out).toContain("Opus");
   });
 
-  test("the wrapper says what is missing instead of failing", async () => {
+  // The other direction of the same probe: the absolute fallbacks must still hit.
+  // Nothing else covers them, so a dropped candidate or fumbled quoting would only
+  // ever show up as the "bun not found" test staying green for the wrong reason.
+  test("the wrapper finds a bun at an absolute fallback path", async () => {
+    const root = temp("pult-sysroot-bun-");
+    mkdirSync(join(root, "usr", "local", "bin"), { recursive: true });
+    symlinkSync(process.execPath, join(root, "usr", "local", "bin", "bun"));
+    const { out, code } = await wrap(wrapper, {
+      HOME: temp("pult-nobun-"),
+      PATH: "/usr/bin:/bin",
+      PULT_SYSROOT: root,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("Opus");
+  });
+
+  test("the wrapper says pult.ts is missing instead of failing", async () => {
     const orphan = join(temp("pult-orphan-"), "pult");
     copyFileSync(wrapper, orphan);
     const { out, code } = await wrap(orphan, onPath);
     expect(code).toBe(0);
     expect(out).toContain("pult.ts not found");
+  });
 
-    // Without PULT_SYSROOT this arm asserts nothing on a machine that has /opt/homebrew/bin/bun.
-    const { out: noBun, code: noBunCode } = await wrap(wrapper, {
+  test("the wrapper says bun is missing instead of failing", async () => {
+    // Without PULT_SYSROOT this asserts nothing on a machine that has /opt/homebrew/bin/bun.
+    const { out, code } = await wrap(wrapper, {
       HOME: temp("pult-nobun-"),
       PATH: "/usr/bin:/bin",
       PULT_SYSROOT: temp("pult-sysroot-"),
     });
-    expect(noBunCode).toBe(0);
-    expect(noBun).toContain("bun not found");
+    expect(code).toBe(0);
+    expect(out).toContain("bun not found");
   });
 });

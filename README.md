@@ -21,7 +21,7 @@ Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 
 
 - **Everything on one row** — nothing wraps, nothing scrolls, and sections you have no data for are simply absent
 - **Colored where it counts** — context and rate-limit percentages go yellow at 50% and red at 80%; a `*` after the branch means uncommitted tracked changes
-- **Two files, no dependencies** — a POSIX `sh` wrapper and ~110 lines of TypeScript that Bun runs directly. No build, no install step, no `node_modules`
+- **Two files, no dependencies** — a POSIX `sh` wrapper and one TypeScript file that Bun runs directly. No build, no install step, no `node_modules`
 - **Never breaks your prompt** — a bad payload or a missing Bun prints one dim line and exits 0, so a crash can never end up in your status line
 
 ## Quick start
@@ -55,7 +55,7 @@ Windows routes the command through Git Bash and should run the wrapper unchanged
 
 ### Why there is a wrapper
 
-`pult` is a 25-line shell script, and it exists so that no absolute path of yours ends up in the install:
+`pult` is a small shell script, and it exists so that no absolute path of yours ends up in the install:
 
 - It walks its own symlink chain to find `pult.ts` beside itself, so the clone can live anywhere and can be linked onto your `PATH` (`ln -s ~/.claude/pult/pult ~/.local/bin/pult`) if you would rather type `pult`.
 - It looks for `bun` on `PATH`, then `$BUN_INSTALL/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and Linux Homebrew. A status line runs outside your shell profile, where `bun` is often missing even though your terminal finds it fine. When no Bun turns up the line reads `statusline: bun not found` instead of going blank.
