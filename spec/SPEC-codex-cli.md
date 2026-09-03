@@ -40,7 +40,7 @@ pult                POSIX launcher for Claude Code
 pult.ts             Claude Code JSON-payload renderer
 tests/pult.test.ts  End-to-end tests for the launcher and renderer
 README.md           User-facing installation and compatibility guide
-SPEC-codex-cli.md   Codex compatibility contract
+spec/SPEC-codex-cli.md  Codex compatibility contract
 ```
 
 ## Code Style
