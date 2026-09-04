@@ -21,7 +21,16 @@ type Session = {
 // The boundary. `unknown` stops here: the payload's types say what the sender
 // promised, so a `number` arrives as JSON null, a string, or NaN serialised to
 // null, and a `string` arrives as a number. Below parse(), types are facts.
-const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+// Negative is refused with the rest: a cost, a duration, a count, a percentage
+// and an epoch are all >= 0, so "-5" is a sender bug, not data. It used to
+// render "+-5" in green.
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+// A percentage over 100 says the sender is confused, not that the window is
+// 250% full. Cap it: the line still reads red, and never prints "5h 250%".
+const percent = (v: unknown): number | null => {
+  const n = num(v);
+  return n === null ? null : Math.min(100, n);
+};
 // A name reaches the terminal verbatim and the status line renders each printed
 // line as its own row, so control characters go: a directory can be named with
 // an escape sequence or a newline.
@@ -40,7 +49,7 @@ const parse = (raw: unknown): Session => {
 
   const window = (label: string, v: unknown) => {
     const w = obj(v);
-    const pct = num(w.used_percentage);
+    const pct = percent(w.used_percentage);
     return pct === null ? null : { label, pct: Math.round(pct), resets: num(w.resets_at) };
   };
 
@@ -66,7 +75,8 @@ const parseContext = (v: unknown): Session["context"] => {
     ? (num(usage.input_tokens) ?? 0) + (num(usage.cache_creation_input_tokens) ?? 0) + (num(usage.cache_read_input_tokens) ?? 0)
     : null;
   const size = num(v.context_window_size);
-  return { pct: num(v.used_percentage) ?? (used && size ? Math.round((100 * used) / size) : 0), used, size };
+  const computed = used && size ? Math.min(100, Math.round((100 * used) / size)) : 0;
+  return { pct: percent(v.used_percentage) ?? computed, used, size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
@@ -109,14 +119,24 @@ const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 
 const git = (cwd: string): string | null => {
   const run = (...a: string[]) => {
-    const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
-    return p.exitCode === 0 ? p.stdout.toString().trim() : null;
+    try {
+      const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
+      return p.exitCode === 0 ? p.stdout.toString().trim() : null;
+    } catch {
+      // No git on PATH. The branch is optional; the line goes on without it.
+      return null;
+    }
   };
   const branch = run("rev-parse", "--abbrev-ref", "HEAD");
   if (!branch) return null;
   const dirty = run("status", "--porcelain", "--untracked-files=no");
   return str(branch + (dirty ? "*" : ""));
 };
+
+if (process.stdin.isTTY || Bun.argv.includes("--help") || Bun.argv.includes("-h")) {
+  console.log(dim(`pult reads the Claude Code session JSON on stdin. Try: echo '{"model":{"display_name":"Opus"}}' | pult`));
+  process.exit(0);
+}
 
 let s: Session;
 try {

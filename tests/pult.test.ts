@@ -165,6 +165,60 @@ describe("pult", () => {
     expect(out).not.toMatch(/│\s+│/);
   });
 
+  // Found by exploration: the environment fails in ways the payload cannot.
+  test("survives git missing from PATH", async () => {
+    // Bun.spawnSync throws ENOENT rather than returning a non-zero exit, and the
+    // status line runs outside any shell profile, where PATH is whatever it is.
+    const proc = Bun.spawn([process.execPath, script], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, PATH: "/nonexistent" },
+    });
+    proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" }, workspace: { current_dir: "/tmp", repo: { name: "pult" } } }));
+    proc.stdin.end();
+    const raw = await new Response(proc.stdout).text();
+    const err = await new Response(proc.stderr).text();
+    expect(await proc.exited).toBe(0);
+    expect(err).toBe("");
+    expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).toBe("Opus │ pult\n");
+  });
+
+  test("says how to use it instead of blocking when asked for help", async () => {
+    const proc = Bun.spawn([process.execPath, script, "--help"], { stdin: "pipe", stdout: "pipe" });
+    proc.stdin.end();
+    const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
+    expect(await proc.exited).toBe(0);
+    expect(out).toContain("stdin");
+  });
+
+  test("drops numbers that are negative, which no field here can be", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      cost: { total_cost_usd: -4.2, total_duration_ms: -90_000, total_lines_added: -5 },
+      rate_limits: { five_hour: { used_percentage: -20, resets_at: -1 } },
+    });
+    expect(code).toBe(0);
+    // The whole line is the model and the repo: every negative field was dropped.
+    expect(out).not.toContain("$");
+    expect(out).not.toContain("5h");
+    expect(out).not.toContain("+");
+    expect(out).not.toMatch(/-\d/);
+  });
+
+  test("caps a percentage at 100 rather than printing what it was sent", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      context_window: { used_percentage: 130 },
+      rate_limits: { five_hour: { used_percentage: 250, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("ctx 100%");
+    expect(out).toContain("5h 100%");
+    expect(out).not.toContain("130");
+    expect(out).not.toContain("250");
+  });
+
   // The wrapper is what settings.json names, so each branch of it is covered here:
   // it runs outside any shell profile, where PATH and the clone's location vary.
   const temps: string[] = [];
