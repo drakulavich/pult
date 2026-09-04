@@ -154,6 +154,83 @@ describe("pult", () => {
     expect(raw).toContain("\x1b[33m");
   });
 
+  test("leaves no empty segment when a rate-limit window has no usable percentage", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { five_hour: { used_percentage: "x" } },
+    });
+    expect(code).toBe(0);
+    // The section is dropped whole rather than joining an empty string between
+    // two separators, which read as "Opus │  │ repo".
+    expect(out).not.toMatch(/│\s+│/);
+  });
+
+  test("treats a fast_mode that is not a boolean as off", async () => {
+    // JSON carries the word, not the value: "false" is a string and every
+    // non-empty one is truthy.
+    for (const fast_mode of ["false", "no", 1, {}, []]) {
+      const { out, code } = await render({ model: { display_name: "Opus" }, fast_mode });
+      expect(code).toBe(0);
+      expect(out).not.toContain("fast");
+    }
+    const { out } = await render({ model: { display_name: "Opus" }, fast_mode: true });
+    expect(out).toContain("fast");
+  });
+
+  // Found by exploration: the environment fails in ways the payload cannot.
+  test("survives git missing from PATH", async () => {
+    // Bun.spawnSync throws ENOENT rather than returning a non-zero exit, and the
+    // status line runs outside any shell profile, where PATH is whatever it is.
+    const proc = Bun.spawn([process.execPath, script], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, PATH: "/nonexistent" },
+    });
+    proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" }, workspace: { current_dir: "/tmp", repo: { name: "pult" } } }));
+    proc.stdin.end();
+    const raw = await new Response(proc.stdout).text();
+    const err = await new Response(proc.stderr).text();
+    expect(await proc.exited).toBe(0);
+    expect(err).toBe("");
+    expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).toBe("Opus │ pult\n");
+  });
+
+  test("says how to use it instead of blocking when asked for help", async () => {
+    const proc = Bun.spawn([process.execPath, script, "--help"], { stdin: "pipe", stdout: "pipe" });
+    proc.stdin.end();
+    const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
+    expect(await proc.exited).toBe(0);
+    expect(out).toContain("stdin");
+  });
+
+  test("drops numbers that are negative, which no field here can be", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      cost: { total_cost_usd: -4.2, total_duration_ms: -90_000, total_lines_added: -5 },
+      rate_limits: { five_hour: { used_percentage: -20, resets_at: -1 } },
+    });
+    expect(code).toBe(0);
+    // The whole line is the model and the repo: every negative field was dropped.
+    expect(out).not.toContain("$");
+    expect(out).not.toContain("5h");
+    expect(out).not.toContain("+");
+    expect(out).not.toMatch(/-\d/);
+  });
+
+  test("caps a percentage at 100 rather than printing what it was sent", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      context_window: { used_percentage: 130 },
+      rate_limits: { five_hour: { used_percentage: 250, resets_at: Math.floor(Date.now() / 1000) + 7800 } },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("ctx 100%");
+    expect(out).toContain("5h 100%");
+    expect(out).not.toContain("130");
+    expect(out).not.toContain("250");
+  });
+
   // The wrapper is what settings.json names, so each branch of it is covered here:
   // it runs outside any shell profile, where PATH and the clone's location vary.
   const temps: string[] = [];
