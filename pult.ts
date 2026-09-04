@@ -126,10 +126,10 @@ const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 // The common dir is the main repository's .git from a linked worktree as much as
 // from the main tree, so the repository is the directory holding it. A bare repo is
 // the directory: /x/thing.git is "thing", /x/pult/.git is "pult".
-const repoName = (common: string | undefined): string | null => {
-  const parts = (common ?? "").split("/").filter((p) => p !== "");
+const repoName = (common: string): string | null => {
+  const parts = common.split("/").filter((p) => p !== "");
   const last = parts.pop();
-  if (last === undefined) return null;
+  if (!last) return null;
   return str(last === ".git" ? (parts.pop() ?? null) : last.replace(/\.git$/, "")) || null;
 };
 
@@ -148,7 +148,7 @@ const git = (cwd: string): { branch: string; repo: string | null } | null => {
   // argument, --path-format is fatal rather than ignored.
   const out = run("rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD");
   if (!out) return null;
-  const [common, head] = out.split("\n");
+  const [common = "", head] = out.split("\n");
   if (!head) return null;
   const dirty = run("status", "--porcelain", "--untracked-files=no");
   const branch = str(head + (dirty ? "*" : ""));

@@ -262,11 +262,11 @@ describe("pult", () => {
     git("init", "-q", "-b", "main");
     git("-c", "user.email=pult@example.com", "-c", "user.name=pult", "commit", "-q", "--allow-empty", "-m", "init");
     git("worktree", "add", "-q", tree, "-b", "wt-demo");
-    return { root, tree };
+    return tree;
   };
 
   test("names the repository, not the worktree directory, when the payload omits the name", async () => {
-    const { tree } = worktree();
+    const tree = worktree();
     const { out, code } = await render({
       model: { display_name: "Opus" },
       workspace: { current_dir: tree, git_worktree: "wt-demo" },
@@ -278,7 +278,7 @@ describe("pult", () => {
   });
 
   test("keeps the payload's repo name ahead of the one git knows", async () => {
-    const { tree } = worktree();
+    const tree = worktree();
     const { out, code } = await render({
       model: { display_name: "Opus" },
       workspace: { current_dir: tree, repo: { name: "kesha-voice-kit" } },
