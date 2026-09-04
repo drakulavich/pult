@@ -154,6 +154,17 @@ describe("pult", () => {
     expect(raw).toContain("\x1b[33m");
   });
 
+  test("leaves no empty segment when a rate-limit window has no usable percentage", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { five_hour: { used_percentage: "x" } },
+    });
+    expect(code).toBe(0);
+    // The section is dropped whole rather than joining an empty string between
+    // two separators, which read as "Opus │  │ repo".
+    expect(out).not.toMatch(/│\s+│/);
+  });
+
   // The wrapper is what settings.json names, so each branch of it is covered here:
   // it runs outside any shell profile, where PATH and the clone's location vary.
   const temps: string[] = [];

@@ -2,22 +2,85 @@
 // Claude Code statusLine: reads the session JSON on stdin, prints one line.
 // Payload shape: https://code.claude.com/docs/en/statusline
 
-// Every leaf is `unknown` on purpose. The field names record what the schema
-// promises; the types record what actually arrives, which is anything at all.
-// That leaves num() and str() as the only way to read one, checked by tsc.
-type RateWindow = { used_percentage?: unknown; resets_at?: unknown };
-type Payload = {
-  cwd?: unknown;
-  model?: { id?: unknown; display_name?: unknown };
-  workspace?: { current_dir?: unknown; project_dir?: unknown; git_worktree?: unknown; repo?: { name?: unknown } };
-  cost?: { total_cost_usd?: unknown; total_duration_ms?: unknown; total_lines_added?: unknown; total_lines_removed?: unknown };
-  context_window?: { context_window_size?: unknown; used_percentage?: unknown; current_usage?: { input_tokens?: unknown; cache_creation_input_tokens?: unknown; cache_read_input_tokens?: unknown } };
-  effort?: { level?: unknown };
-  fast_mode?: unknown;
-  rate_limits?: { five_hour?: RateWindow; seven_day?: RateWindow };
-  agent?: { name?: unknown };
-  pr?: { number?: unknown; review_state?: unknown };
-  worktree?: { name?: unknown; branch?: unknown };
+// What the line renders. Everything here is already checked: a field that
+// arrived unusable is null or absent, never a string where a number belongs.
+type Session = {
+  model: string;
+  flags: string[];
+  context: { pct: number; used: number | null; size: number | null } | null;
+  cost: { usd: number | null; ms: number | null } | null;
+  lines: { added: number; removed: number } | null;
+  limits: { label: string; pct: number; resets: number | null }[];
+  cwd: string;
+  repo: string;
+  worktree: string | null;
+  pr: { number: number; state: string | null } | null;
+  agent: string | null;
+};
+
+// The boundary. `unknown` stops here: the payload's types say what the sender
+// promised, so a `number` arrives as JSON null, a string, or NaN serialised to
+// null, and a `string` arrives as a number. Below parse(), types are facts.
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+// A name reaches the terminal verbatim and the status line renders each printed
+// line as its own row, so control characters go: a directory can be named with
+// an escape sequence or a newline.
+const str = (v: unknown): string | null => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : null);
+const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {});
+
+const parse = (raw: unknown): Session => {
+  const p = obj(raw);
+  const model = obj(p.model);
+  const workspace = obj(p.workspace);
+  const effort = str(obj(p.effort).level);
+
+  const cwd = str(workspace.current_dir) ?? str(p.cwd) ?? process.cwd();
+
+  const window = (label: string, v: unknown) => {
+    const pct = num(obj(v).used_percentage);
+    return pct === null ? null : { label, pct: Math.round(pct), resets: num(obj(v).resets_at) };
+  };
+
+  return {
+    model: str(model.display_name) ?? str(model.id) ?? "?",
+    flags: [p.fast_mode ? "fast" : null, effort && effort !== "high" ? effort : null].filter((f) => f !== null),
+    context: parseContext(p.context_window),
+    cost: parseCost(p.cost),
+    lines: parseLines(p.cost),
+    limits: [window("5h", obj(p.rate_limits).five_hour), window("7d", obj(p.rate_limits).seven_day)].filter((w) => w !== null),
+    cwd,
+    repo: str(obj(workspace.repo).name) ?? cwd.split("/").pop() ?? "",
+    worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree),
+    pr: parsePr(p.pr),
+    agent: str(obj(p.agent).name),
+  };
+};
+
+const parseContext = (v: unknown): Session["context"] => {
+  if (typeof v !== "object" || v === null) return null;
+  const cw = obj(v);
+  const u = cw.current_usage;
+  const used = typeof u === "object" && u !== null ? (num(obj(u).input_tokens) ?? 0) + (num(obj(u).cache_creation_input_tokens) ?? 0) + (num(obj(u).cache_read_input_tokens) ?? 0) : null;
+  const size = num(cw.context_window_size);
+  return { pct: num(cw.used_percentage) ?? (used && size ? Math.round((100 * used) / size) : 0), used, size };
+};
+
+const parseCost = (v: unknown): Session["cost"] => {
+  if (typeof v !== "object" || v === null) return null;
+  const usd = num(obj(v).total_cost_usd);
+  const ms = num(obj(v).total_duration_ms);
+  return usd === null && !ms ? null : { usd, ms };
+};
+
+const parseLines = (v: unknown): Session["lines"] => {
+  const added = num(obj(v).total_lines_added) ?? 0;
+  const removed = num(obj(v).total_lines_removed) ?? 0;
+  return added || removed ? { added, removed } : null;
+};
+
+const parsePr = (v: unknown): Session["pr"] => {
+  const number = num(obj(v).number);
+  return number ? { number, state: str(obj(v).review_state) } : null;
 };
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -30,12 +93,6 @@ const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const YELLOW = 50;
 const RED = 80;
 const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW ? yellow(s) : green(s));
-
-// A field typed number can arrive as null, a string, or absent; only a real number renders.
-const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-// Same for a field typed string, and what does render reaches the terminal verbatim,
-// so control characters go: a directory may be named with an escape sequence or a newline.
-const str = (v: unknown): string | null => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : null);
 
 const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
 const dur = (ms: number) => {
@@ -55,11 +112,11 @@ const git = (cwd: string): string | null => {
   return str(branch + (dirty ? "*" : ""));
 };
 
-let p: Payload = {};
+let s: Session;
 try {
-  const parsed: unknown = JSON.parse(await Bun.stdin.text());
-  if (typeof parsed !== "object" || parsed === null) throw new Error("not a payload");
-  p = parsed as Payload;
+  const raw: unknown = JSON.parse(await Bun.stdin.text());
+  if (typeof raw !== "object" || raw === null) throw new Error("not a payload");
+  s = parse(raw);
 } catch {
   console.log(dim("statusline: no payload"));
   process.exit(0);
@@ -67,60 +124,31 @@ try {
 
 const parts: string[] = [];
 
-const model = str(p.model?.display_name) ?? str(p.model?.id) ?? "?";
-const effort = str(p.effort?.level);
-const flags = [p.fast_mode ? "fast" : null, effort && effort !== "high" ? effort : null].filter(Boolean).join(",");
-parts.push(bold(cyan(model)) + (flags ? dim(` ${flags}`) : ""));
+parts.push(bold(cyan(s.model)) + (s.flags.length ? dim(` ${s.flags.join(",")}`) : ""));
 
-const cw = p.context_window;
-if (cw) {
-  const u = cw.current_usage;
-  const used = u ? (num(u.input_tokens) ?? 0) + (num(u.cache_creation_input_tokens) ?? 0) + (num(u.cache_read_input_tokens) ?? 0) : null;
-  const size = num(cw.context_window_size);
-  const pct = num(cw.used_percentage) ?? (used && size ? Math.round((100 * used) / size) : 0);
-  const suffix = size ? `/${k(size)}` : "";
-  parts.push(byLevel(pct, `ctx ${pct}%`) + dim(used !== null ? ` ${k(used)}${suffix}` : suffix));
+if (s.context) {
+  const suffix = s.context.size ? `/${k(s.context.size)}` : "";
+  parts.push(byLevel(s.context.pct, `ctx ${s.context.pct}%`) + dim(s.context.used !== null ? ` ${k(s.context.used)}${suffix}` : suffix));
 }
 
-if (p.cost) {
-  const c = p.cost;
-  const cost = num(c.total_cost_usd);
-  const ms = num(c.total_duration_ms);
-  const bits = [cost !== null ? `$${cost.toFixed(2)}` : null, ms ? dur(ms) : null].filter(Boolean);
-  if (bits.length) parts.push(bits.join(dim(" · ")));
-  const added = num(c.total_lines_added) ?? 0;
-  const removed = num(c.total_lines_removed) ?? 0;
-  if (added || removed) parts.push(green(`+${added}`) + dim("/") + red(`-${removed}`));
+if (s.cost) {
+  const bits = [s.cost.usd !== null ? `$${s.cost.usd.toFixed(2)}` : null, s.cost.ms ? dur(s.cost.ms) : null].filter((b) => b !== null);
+  parts.push(bits.join(dim(" · ")));
 }
 
-const rl = p.rate_limits;
-if (rl?.five_hour || rl?.seven_day) {
-  const seg = (label: string, w?: RateWindow) => {
-    const pct = num(w?.used_percentage);
-    if (pct === null) return null;
-    const resets = num(w?.resets_at);
-    // Judge the number the line prints, not the one behind it: a window at 49.6
-    // reads "50%", and a 50% that renders green with no reset time is a lie.
-    // A reset time is only worth its width once the window is close enough to bite.
-    const shown = Math.round(pct);
-    return byLevel(shown, `${label} ${shown}%`) + (resets && shown >= YELLOW ? dim(` ↻${until(resets)}`) : "");
-  };
-  parts.push([seg("5h", rl.five_hour), seg("7d", rl.seven_day)].filter(Boolean).join(dim(" · ")));
+if (s.lines) parts.push(green(`+${s.lines.added}`) + dim("/") + red(`-${s.lines.removed}`));
+
+if (s.limits.length) {
+  // A reset time is only worth its width once the window is close enough to bite.
+  const seg = (w: Session["limits"][number]) => byLevel(w.pct, `${w.label} ${w.pct}%`) + (w.resets && w.pct >= YELLOW ? dim(` ↻${until(w.resets)}`) : "");
+  parts.push(s.limits.map(seg).join(dim(" · ")));
 }
 
-const cwd = str(p.workspace?.current_dir) ?? str(p.cwd) ?? process.cwd();
-const repo = str(p.workspace?.repo?.name) ?? cwd.split("/").pop() ?? "";
-const branch = git(cwd);
-const wt = str(p.worktree?.name) ?? str(p.workspace?.git_worktree);
-parts.push(dim(repo) + (branch ? dim(":") + branch : "") + (wt ? dim(` (wt ${wt})`) : ""));
+const branch = git(s.cwd);
+parts.push(dim(s.repo) + (branch ? dim(":") + branch : "") + (s.worktree ? dim(` (wt ${s.worktree})`) : ""));
 
-const prNumber = num(p.pr?.number);
-if (prNumber) {
-  const state = str(p.pr?.review_state);
-  parts.push(`PR #${prNumber}` + (state ? dim(` ${state}`) : ""));
-}
-const agent = str(p.agent?.name);
-if (agent) parts.push(dim(`agent ${agent}`));
+if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state ? dim(` ${s.pr.state}`) : ""));
+if (s.agent) parts.push(dim(`agent ${s.agent}`));
 
 console.log(parts.join(dim(" │ ")));
 
