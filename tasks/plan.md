@@ -13,6 +13,6 @@
 
 ## Risks
 
-- Codex can change supported footer identifiers. Mitigation: direct users to `/statusline`; do not hard-code identifiers.
+- Codex can change supported footer identifiers. Mitigation: publish the tested list, link the source, and direct users to `/statusline` for version-specific discovery.
 - Account entitlement affects cost and usage. Mitigation: label both as availability-dependent.
 - Users may assume Pult renders Codex. Mitigation: state the boundary first.
