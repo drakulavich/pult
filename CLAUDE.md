@@ -10,7 +10,8 @@ around it: that is how a line earns its place, or how the code earns a fix.
   non-string `cwd` threw out of `cwd.split()`. Both printed a stack trace where
   the status line goes.
 - **The payload is parsed once, into `Session`.** `parse()` is the only place
-  that touches the raw JSON, and `num()` and `str()` are the only way through it:
+  that touches the raw JSON, and `num()`, `str()` and `bool()` are the only way
+  through it:
   the type says what the sender promised, not what arrives, so a `number` shows up
   as JSON null or a string. Below `parse()` the types are facts and the renderer
   reads them directly. Assigning a raw field to `Session` does not compile, which

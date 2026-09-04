@@ -165,6 +165,18 @@ describe("pult", () => {
     expect(out).not.toMatch(/│\s+│/);
   });
 
+  test("treats a fast_mode that is not a boolean as off", async () => {
+    // JSON carries the word, not the value: "false" is a string and every
+    // non-empty one is truthy.
+    for (const fast_mode of ["false", "no", 1, {}, []]) {
+      const { out, code } = await render({ model: { display_name: "Opus" }, fast_mode });
+      expect(code).toBe(0);
+      expect(out).not.toContain("fast");
+    }
+    const { out } = await render({ model: { display_name: "Opus" }, fast_mode: true });
+    expect(out).toContain("fast");
+  });
+
   // Found by exploration: the environment fails in ways the payload cannot.
   test("survives git missing from PATH", async () => {
     // Bun.spawnSync throws ENOENT rather than returning a non-zero exit, and the

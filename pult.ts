@@ -35,6 +35,9 @@ const percent = (v: unknown): number | null => {
 // line as its own row, so control characters go: a directory can be named with
 // an escape sequence or a newline.
 const str = (v: unknown): string | null => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : null);
+// A flag is on only when it arrived as the boolean true. JSON carries the word,
+// and every non-empty string is truthy, so "false" used to read as fast.
+const bool = (v: unknown): boolean => v === true;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {});
 
@@ -55,7 +58,7 @@ const parse = (raw: unknown): Session => {
 
   return {
     model: str(model.display_name) ?? str(model.id) ?? "?",
-    flags: [p.fast_mode ? "fast" : null, effort && effort !== "high" ? effort : null].filter((f) => f !== null),
+    flags: [bool(p.fast_mode) ? "fast" : null, effort && effort !== "high" ? effort : null].filter((f) => f !== null),
     context: parseContext(p.context_window),
     cost: parseCost(p.cost),
     lines: parseLines(p.cost),
