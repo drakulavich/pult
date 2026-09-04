@@ -11,7 +11,9 @@ around it: that is how a line earns its place, or how the code earns a fix.
   the status line goes.
 - **Every payload field goes through `num()` or `str()`.** The type says what the
   sender promised, not what arrives; a `number` shows up as JSON null or a string.
-  Reading `p.cost.total_cost_usd` directly is the bug those two exist to prevent.
+  Reading `p.cost.total_cost_usd` directly is the bug those two exist to prevent,
+  which is why every leaf of `Payload` is typed `unknown`: tsc rejects the direct
+  read of a number, and the tests catch a direct read of a string.
   A field that is absent or unusable drops its whole section rather than
   rendering a zero, a placeholder, or `NaN`.
 - **One subprocess.** The line re-renders every `refreshInterval` seconds and
@@ -21,5 +23,6 @@ around it: that is how a line earns its place, or how the code earns a fix.
   decide whether the new line is right and update the regex deliberately. It is
   not flake, and it is the only thing watching the output as a whole.
 
-There is no build, no lint, and no dependency install; Bun runs `pult.ts`
-directly.
+Bun runs `pult.ts` directly: no build, and nothing to install to run it or to
+run the tests. The one devDependency is `tsc`, which `bun run typecheck` and CI
+use to hold the rule above.

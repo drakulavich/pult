@@ -2,18 +2,22 @@
 // Claude Code statusLine: reads the session JSON on stdin, prints one line.
 // Payload shape: https://code.claude.com/docs/en/statusline
 
+// Every leaf is `unknown` on purpose. The field names record what the schema
+// promises; the types record what actually arrives, which is anything at all.
+// That leaves num() and str() as the only way to read one, checked by tsc.
+type RateWindow = { used_percentage?: unknown; resets_at?: unknown };
 type Payload = {
-  cwd?: string;
-  model?: { id?: string; display_name?: string };
-  workspace?: { current_dir?: string; project_dir?: string; git_worktree?: string; repo?: { name?: string } };
-  cost?: { total_cost_usd?: number; total_duration_ms?: number; total_lines_added?: number; total_lines_removed?: number };
-  context_window?: { context_window_size?: number; used_percentage?: number; current_usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
-  effort?: { level?: string };
-  fast_mode?: boolean;
-  rate_limits?: { five_hour?: { used_percentage?: number; resets_at?: number }; seven_day?: { used_percentage?: number; resets_at?: number } };
-  agent?: { name?: string };
-  pr?: { number?: number; review_state?: string };
-  worktree?: { name?: string; branch?: string };
+  cwd?: unknown;
+  model?: { id?: unknown; display_name?: unknown };
+  workspace?: { current_dir?: unknown; project_dir?: unknown; git_worktree?: unknown; repo?: { name?: unknown } };
+  cost?: { total_cost_usd?: unknown; total_duration_ms?: unknown; total_lines_added?: unknown; total_lines_removed?: unknown };
+  context_window?: { context_window_size?: unknown; used_percentage?: unknown; current_usage?: { input_tokens?: unknown; cache_creation_input_tokens?: unknown; cache_read_input_tokens?: unknown } };
+  effort?: { level?: unknown };
+  fast_mode?: unknown;
+  rate_limits?: { five_hour?: RateWindow; seven_day?: RateWindow };
+  agent?: { name?: unknown };
+  pr?: { number?: unknown; review_state?: unknown };
+  worktree?: { name?: unknown; branch?: unknown };
 };
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -91,7 +95,7 @@ if (p.cost) {
 
 const rl = p.rate_limits;
 if (rl?.five_hour || rl?.seven_day) {
-  const seg = (label: string, w?: { used_percentage?: number; resets_at?: number }) => {
+  const seg = (label: string, w?: RateWindow) => {
     const pct = num(w?.used_percentage);
     if (pct === null) return null;
     const resets = num(w?.resets_at);
@@ -119,3 +123,5 @@ const agent = str(p.agent?.name);
 if (agent) parts.push(dim(`agent ${agent}`));
 
 console.log(parts.join(dim(" │ ")));
+
+export {};
