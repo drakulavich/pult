@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const script = resolve(import.meta.dir, "..", "pult.ts");
 const wrapper = resolve(import.meta.dir, "..", "pult");
@@ -243,8 +243,6 @@ describe("pult", () => {
     expect(out).not.toContain("250");
   });
 
-  // The wrapper is what settings.json names, so each branch of it is covered here:
-  // it runs outside any shell profile, where PATH and the clone's location vary.
   const temps: string[] = [];
   const temp = (prefix: string) => {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -253,6 +251,52 @@ describe("pult", () => {
   };
   afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
+  // The only tests that need a real repository: the repo name comes from the
+  // directory, and nothing but a worktree makes the two differ.
+  const worktree = () => {
+    const base = temp("pult-git-");
+    const root = join(base, "pult-fixture");
+    const tree = join(base, "wt-demo");
+    mkdirSync(root, { recursive: true });
+    const git = (...a: string[]) => Bun.spawnSync(["git", "-C", root, ...a], { stdout: "ignore", stderr: "ignore" });
+    git("init", "-q", "-b", "main");
+    git("-c", "user.email=pult@example.com", "-c", "user.name=pult", "commit", "-q", "--allow-empty", "-m", "init");
+    git("worktree", "add", "-q", tree, "-b", "wt-demo");
+    return { root, tree };
+  };
+
+  test("names the repository, not the worktree directory, when the payload omits the name", async () => {
+    const { tree } = worktree();
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: tree, git_worktree: "wt-demo" },
+    });
+    expect(code).toBe(0);
+    // Not "wt-demo:wt-demo (wt wt-demo)": the repo went missing from the line
+    // exactly where the worktree section says you are somewhere unusual.
+    expect(out).toContain("pult-fixture:wt-demo (wt wt-demo)");
+  });
+
+  test("keeps the payload's repo name ahead of the one git knows", async () => {
+    const { tree } = worktree();
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: tree, repo: { name: "kesha-voice-kit" } },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("kesha-voice-kit:wt-demo");
+    expect(out).not.toContain("pult-fixture");
+  });
+
+  test("falls back to the directory name outside a repository", async () => {
+    const dir = temp("pult-norepo-");
+    const { out, code } = await render({ model: { display_name: "Opus" }, workspace: { current_dir: dir } });
+    expect(code).toBe(0);
+    expect(out).toContain(basename(dir));
+  });
+
+  // The wrapper is what settings.json names, so each branch of it is covered here:
+  // it runs outside any shell profile, where PATH and the clone's location vary.
   async function wrap(bin: string, env: Record<string, string>): Promise<{ out: string; code: number }> {
     const proc = Bun.spawn([bin], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
     proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" } }));
