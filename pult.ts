@@ -207,7 +207,10 @@ const head = branch(s.cwd);
 // can come back empty at once: / has no last segment, and a directory named with control
 // characters has nothing left after str(). The colon and the space join two names when
 // there are two, so the line cannot end on ":" or a separator with nothing after it.
-const repo = s.repo ?? repoOf(s.cwd) ?? s.cwd.split("/").pop() ?? "";
+// rev-parse only earns its subprocess where status has already proved there is a
+// work tree. Outside one it would fail the same way, and that is the ordinary
+// shape of working outside a repository: no repo to identify, so no name sent.
+const repo = s.repo ?? (head !== null ? repoOf(s.cwd) : null) ?? s.cwd.split("/").pop() ?? "";
 const where = [repo ? dim(repo) : null, head].filter((n) => n !== null).join(dim(":"));
 const wt = s.worktree ? dim(`(wt ${s.worktree})`) : null;
 const seg = [where || null, wt].filter((n) => n !== null).join(" ");

@@ -300,6 +300,15 @@ describe("pult", () => {
     expect(calls[1]).toContain("rev-parse");
   });
 
+  // Outside a work tree there is no name to fetch, and rev-parse would fail the
+  // same way status just did. Unnamed is the normal shape of that case: Claude
+  // Code sends no repo when there is no repo to identify.
+  test("does not pay for a name where status found no work tree", async () => {
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: temp("pult-plain-") } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("status");
+  });
+
   // status answers where rev-parse used to refuse: HEAD is not a revision yet.
   test("shows the branch in a repository with no commits", async () => {
     const dir = join(temp("pult-fresh-"), "unborn");
