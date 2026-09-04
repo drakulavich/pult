@@ -18,9 +18,11 @@ around it: that is how a line earns its place, or how the code earns a fix.
   is what stops the two crashes above coming back. A field that arrived unusable
   is null, and its section is dropped rather than rendering a zero, a placeholder,
   or `NaN`.
-- **One subprocess.** The line re-renders every `refreshInterval` seconds and
-  `git()` is the only thing it shells out to. Wanting a second git fact means
-  adding arguments to that one `rev-parse`, not a second call (see #3).
+- **Two subprocesses, and `git()` owns both.** The line re-renders every
+  `refreshInterval` seconds, and `git()` is the only thing it shells out to:
+  one `rev-parse`, one `status`. Wanting a second git fact means adding
+  arguments to that `rev-parse`, not a third call, which is how the repo
+  name arrived (#13).
 - **The main test pins the whole rendered line as one regex.** When it fails,
   decide whether the new line is right and update the regex deliberately. It is
   not flake, and it is the only thing watching the output as a whole.
