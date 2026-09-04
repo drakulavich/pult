@@ -218,6 +218,18 @@ describe("pult", () => {
     expect(out).not.toMatch(/-\d/);
   });
 
+  // The context percentage is rounded wherever it came from, so the section reads the
+  // same width whether the sender supplied it or it was computed from current_usage.
+  test("judges the context window by the percentage it prints, not the one behind it", async () => {
+    const { out, raw, code } = await render({
+      model: { display_name: "Opus" },
+      context_window: { used_percentage: 49.6 },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("ctx 50%");
+    expect(raw).toContain("\x1b[33m");
+  });
+
   test("caps a percentage at 100 rather than printing what it was sent", async () => {
     const { out, code } = await render({
       model: { display_name: "Opus" },

@@ -78,8 +78,11 @@ const parseContext = (v: unknown): Session["context"] => {
     ? (num(usage.input_tokens) ?? 0) + (num(usage.cache_creation_input_tokens) ?? 0) + (num(usage.cache_read_input_tokens) ?? 0)
     : null;
   const size = num(v.context_window_size);
-  const computed = used && size ? Math.min(100, Math.round((100 * used) / size)) : 0;
-  return { pct: percent(v.used_percentage) ?? computed, used, size };
+  const computed = used && size ? Math.min(100, (100 * used) / size) : 0;
+  // Rounded once, whichever path supplied it: a payload carrying used_percentage used to
+  // render it verbatim while a computed one was whole, so the same session changed width
+  // with the sender's keys. The printed number is what byLevel colors.
+  return { pct: Math.round(percent(v.used_percentage) ?? computed), used, size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
