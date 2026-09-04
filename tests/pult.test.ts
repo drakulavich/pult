@@ -277,6 +277,32 @@ describe("pult", () => {
     expect(out).toContain("pult-fixture:wt-demo (wt wt-demo)");
   });
 
+  // Found by exploration: an empty name is a string, so it used to slip past both
+  // fallbacks and print a bare ":main" -- a colon with nothing in front of it.
+  test("treats an empty repo name as absent rather than as a name", async () => {
+    const tree = worktree();
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: tree, repo: { name: "" } },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("pult-fixture:wt-demo");
+    expect(out).not.toContain(" :");
+  });
+
+  test("drops the repo section rather than ending the line on a separator", async () => {
+    // "/" has no last segment and is no repository, so every name is empty.
+    const { out, code } = await render({ model: { display_name: "Opus" }, workspace: { current_dir: "/" } });
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus");
+  });
+
+  test("keeps the worktree alone rather than spacing it off an empty name", async () => {
+    const { out, code } = await render({ model: { display_name: "Opus" }, workspace: { current_dir: "/", git_worktree: "review" } });
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ (wt review)");
+  });
+
   test("keeps the payload's repo name ahead of the one git knows", async () => {
     const tree = worktree();
     const { out, code } = await render({

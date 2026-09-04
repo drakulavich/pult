@@ -64,7 +64,7 @@ const parse = (raw: unknown): Session => {
     lines: parseLines(p.cost),
     limits: [window("5h", limits.five_hour), window("7d", limits.seven_day)].filter((w) => w !== null),
     cwd,
-    repo: str(obj(workspace.repo).name),
+    repo: str(obj(workspace.repo).name) || null,
     worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree),
     pr: parsePr(p.pr),
     agent: str(obj(p.agent).name),
@@ -194,9 +194,15 @@ if (s.limits.length) {
 
 const g = git(s.cwd);
 // Three names, best first: what the payload said, what git knows, and the directory
-// -- which inside a worktree is the worktree's name, not the repository's.
+// -- which inside a worktree is the worktree's name, not the repository's. Any of them
+// can come back empty at once: / has no last segment, and a directory named with control
+// characters has nothing left after str(). The colon and the space join two names when
+// there are two, so the line cannot end on ":" or a separator with nothing after it.
 const repo = s.repo ?? g?.repo ?? s.cwd.split("/").pop() ?? "";
-parts.push(dim(repo) + (g ? dim(":") + g.branch : "") + (s.worktree ? dim(` (wt ${s.worktree})`) : ""));
+const where = [repo ? dim(repo) : null, g?.branch ?? null].filter((n) => n !== null).join(dim(":"));
+const wt = s.worktree ? dim(`(wt ${s.worktree})`) : null;
+const seg = [where || null, wt].filter((n) => n !== null).join(" ");
+if (seg) parts.push(seg);
 
 if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state ? dim(` ${s.pr.state}`) : ""));
 if (s.agent) parts.push(dim(`agent ${s.agent}`));
