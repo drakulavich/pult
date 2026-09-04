@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -264,6 +264,60 @@ describe("pult", () => {
     git("worktree", "add", "-q", tree, "-b", "wt-demo");
     return tree;
   };
+
+  // The "one subprocess" rule, made checkable: a git that logs itself before
+  // handing over to the real one, so the count is a fact rather than a claim.
+  const spawns = async (payload: unknown): Promise<string[]> => {
+    const dir = temp("pult-gitlog-");
+    const log = join(dir, "log");
+    const bin = join(dir, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "git"), `#!/bin/sh\necho "$*" >> ${log}\nexec ${Bun.which("git")} "$@"\n`, { mode: 0o755 });
+    const proc = Bun.spawn([process.execPath, script], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    });
+    proc.stdin.write(JSON.stringify(payload));
+    proc.stdin.end();
+    await new Response(proc.stdout).text();
+    await proc.exited;
+    return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
+  };
+
+  const root = resolve(import.meta.dir, "..");
+
+  test("shells out once when the payload names the repository", async () => {
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: root, repo: { name: "pult" } } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("status");
+  });
+
+  test("pays for a second call only when the repository has no name", async () => {
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: root } });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("rev-parse");
+  });
+
+  // Outside a work tree there is no name to fetch, and rev-parse would fail the
+  // same way status just did. Unnamed is the normal shape of that case: Claude
+  // Code sends no repo when there is no repo to identify.
+  test("does not pay for a name where status found no work tree", async () => {
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: temp("pult-plain-") } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("status");
+  });
+
+  // status answers where rev-parse used to refuse: HEAD is not a revision yet.
+  test("shows the branch in a repository with no commits", async () => {
+    const dir = join(temp("pult-fresh-"), "unborn");
+    mkdirSync(dir, { recursive: true });
+    Bun.spawnSync(["git", "-C", dir, "-c", "init.defaultBranch=main", "init", "-q"], { stdout: "ignore", stderr: "ignore" });
+    const { out, code } = await render({ model: { display_name: "Opus" }, workspace: { current_dir: dir } });
+    expect(code).toBe(0);
+    expect(out).toContain("unborn:main");
+  });
 
   test("names the repository, not the worktree directory, when the payload omits the name", async () => {
     const tree = worktree();

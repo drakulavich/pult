@@ -19,8 +19,13 @@ around it: that is how a line earns its place, or how the code earns a fix.
   is null, and its section is dropped rather than rendering a zero, a placeholder,
   or `NaN`.
 - **One subprocess.** The line re-renders every `refreshInterval` seconds and
-  `git()` is the only thing it shells out to. Wanting a second git fact means
-  adding arguments to that one `rev-parse`, not a second call (see #3).
+  `run()` is the only thing it shells out to. `status --porcelain=v2 --branch`
+  answers the branch and whether the tree is dirty together, so the usual render
+  costs one call. The repository name needs `rev-parse --git-common-dir`, which
+  no status output carries, so that second call is made only when the payload
+  left the repository unnamed (#3) and status has already found a work tree to
+  name. Wanting another git fact means arguments on a call that already runs,
+  not a new one, and a test counts the calls.
 - **The main test pins the whole rendered line as one regex.** When it fails,
   decide whether the new line is right and update the regex deliberately. It is
   not flake, and it is the only thing watching the output as a whole.
