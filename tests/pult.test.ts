@@ -6,13 +6,16 @@ import { basename, dirname, join, resolve } from "node:path";
 const script = resolve(import.meta.dir, "..", "pult.ts");
 const wrapper = resolve(import.meta.dir, "..", "pult");
 
-async function render(payload: unknown): Promise<{ out: string; raw: string; code: number }> {
-  const proc = Bun.spawn(["bun", script], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+type Env = Record<string, string | undefined>;
+
+async function render(payload: unknown, env?: Env): Promise<{ out: string; raw: string; err: string; code: number }> {
+  const proc = Bun.spawn([process.execPath, script], { stdin: "pipe", stdout: "pipe", stderr: "pipe", ...(env ? { env } : {}) });
   proc.stdin.write(typeof payload === "string" ? payload : JSON.stringify(payload));
   proc.stdin.end();
   const raw = await new Response(proc.stdout).text();
+  const err = await new Response(proc.stderr).text();
   const out = raw.replace(/\x1b\[[0-9;]*m/g, "");
-  return { out, raw, code: await proc.exited };
+  return { out, raw, err, code: await proc.exited };
 }
 
 describe("pult", () => {
@@ -181,19 +184,13 @@ describe("pult", () => {
   test("survives git missing from PATH", async () => {
     // Bun.spawnSync throws ENOENT rather than returning a non-zero exit, and the
     // status line runs outside any shell profile, where PATH is whatever it is.
-    const proc = Bun.spawn([process.execPath, script], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, PATH: "/nonexistent" },
-    });
-    proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" }, workspace: { current_dir: "/tmp", repo: { name: "pult" } } }));
-    proc.stdin.end();
-    const raw = await new Response(proc.stdout).text();
-    const err = await new Response(proc.stderr).text();
-    expect(await proc.exited).toBe(0);
+    const { out, err, code } = await render(
+      { model: { display_name: "Opus" }, workspace: { current_dir: "/tmp", repo: { name: "pult" } } },
+      { ...process.env, PATH: "/nonexistent" },
+    );
+    expect(code).toBe(0);
     expect(err).toBe("");
-    expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).toBe("Opus │ pult\n");
+    expect(out).toBe("Opus │ pult\n");
   });
 
   test("says how to use it instead of blocking when asked for help", async () => {
@@ -273,29 +270,20 @@ describe("pult", () => {
     const bin = join(dir, "bin");
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(bin, "git"), `#!/bin/sh\necho "$*" >> ${log}\nexec ${Bun.which("git")} "$@"\n`, { mode: 0o755 });
-    const proc = Bun.spawn([process.execPath, script], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-    });
-    proc.stdin.write(JSON.stringify(payload));
-    proc.stdin.end();
-    await new Response(proc.stdout).text();
-    await proc.exited;
+    await render(payload, { ...process.env, PATH: `${bin}:${process.env.PATH}` });
     return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
   };
 
-  const root = resolve(import.meta.dir, "..");
+  const repoRoot = resolve(import.meta.dir, "..");
 
   test("shells out once when the payload names the repository", async () => {
-    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: root, repo: { name: "pult" } } });
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: repoRoot, repo: { name: "pult" } } });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("status");
   });
 
   test("pays for a second call only when the repository has no name", async () => {
-    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: root } });
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: repoRoot } });
     expect(calls).toHaveLength(2);
     expect(calls[1]).toContain("rev-parse");
   });

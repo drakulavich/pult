@@ -25,11 +25,14 @@ type Session = {
 // and an epoch are all >= 0, so "-5" is a sender bug, not data. It used to
 // render "+-5" in green.
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
-// A percentage over 100 says the sender is confused, not that the window is
-// 250% full. Cap it: the line still reads red, and never prints "5h 250%".
+// A percentage is whole, and never over 100. Over 100 says the sender is confused
+// rather than that the window is 250% full, so the line still reads red without
+// printing "5h 250%"; and the rounded number is the one that reaches the terminal,
+// so it is the one the colour and the reset time get judged by. Both rules live
+// here because both have been got wrong once already, in two different sections.
 const percent = (v: unknown): number | null => {
   const n = num(v);
-  return n === null ? null : Math.min(100, n);
+  return n === null ? null : Math.round(Math.min(100, n));
 };
 // A name reaches the terminal verbatim and the status line renders each printed
 // line as its own row, so control characters go: a directory can be named with
@@ -53,7 +56,7 @@ const parse = (raw: unknown): Session => {
   const window = (label: string, v: unknown) => {
     const w = obj(v);
     const pct = percent(w.used_percentage);
-    return pct === null ? null : { label, pct: Math.round(pct), resets: num(w.resets_at) };
+    return pct === null ? null : { label, pct, resets: num(w.resets_at) };
   };
 
   return {
@@ -79,10 +82,11 @@ const parseContext = (v: unknown): Session["context"] => {
     : null;
   const size = num(v.context_window_size);
   const computed = used && size ? Math.min(100, (100 * used) / size) : 0;
-  // Rounded once, whichever path supplied it: a payload carrying used_percentage used to
-  // render it verbatim while a computed one was whole, so the same session changed width
-  // with the sender's keys. The printed number is what byLevel colors.
-  return { pct: Math.round(percent(v.used_percentage) ?? computed), used, size };
+  // Both paths end whole: percent() rounds what the payload sent, Math.round what is
+  // computed here. A payload carrying used_percentage used to render it verbatim while
+  // a computed one was already whole, so the same session changed width with the
+  // sender's keys.
+  return { pct: percent(v.used_percentage) ?? Math.round(computed), used, size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
@@ -139,7 +143,7 @@ const run = (cwd: string, ...a: string[]): string | null => {
     const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
     return p.exitCode === 0 ? p.stdout.toString().trim() : null;
   } catch {
-    // No git on PATH. The branch is optional; the line goes on without it.
+    // No git on PATH. Both facts it answers are optional; the line goes on without them.
     return null;
   }
 };
@@ -202,19 +206,25 @@ if (s.limits.length) {
 }
 
 const head = branch(s.cwd);
+
+// A function, not a value: the ?? below decides whether it runs at all, and this one
+// costs a subprocess. rev-parse only earns it where status has already found a work
+// tree -- outside one it would fail the same way, and outside one is the ordinary
+// case: no repository to identify, so no name in the payload either.
+const fromGit = () => (head !== null ? repoOf(s.cwd) : null);
+
 // Three names, best first: what the payload said, what git knows, and the directory
-// -- which inside a worktree is the worktree's name, not the repository's. Any of them
-// can come back empty at once: / has no last segment, and a directory named with control
-// characters has nothing left after str(). The colon and the space join two names when
-// there are two, so the line cannot end on ":" or a separator with nothing after it.
-// rev-parse only earns its subprocess where status has already proved there is a
-// work tree. Outside one it would fail the same way, and that is the ordinary
-// shape of working outside a repository: no repo to identify, so no name sent.
-const repo = s.repo ?? (head !== null ? repoOf(s.cwd) : null) ?? s.cwd.split("/").pop() ?? "";
+// -- which inside a worktree is the worktree's name, not the repository's.
+const repo = s.repo ?? fromGit() ?? s.cwd.split("/").pop() ?? "";
+
+// All three can be empty at once: / has no last segment, and a directory named with
+// control characters has nothing left after str(). The colon and the space join two
+// names when there are two, so the line can never end on ":" or on a separator with
+// nothing behind it.
 const where = [repo ? dim(repo) : null, head].filter((n) => n !== null).join(dim(":"));
 const wt = s.worktree ? dim(`(wt ${s.worktree})`) : null;
-const seg = [where || null, wt].filter((n) => n !== null).join(" ");
-if (seg) parts.push(seg);
+const place = [where || null, wt].filter((n) => n !== null).join(" ");
+if (place) parts.push(place);
 
 if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state ? dim(` ${s.pr.state}`) : ""));
 if (s.agent) parts.push(dim(`agent ${s.agent}`));
