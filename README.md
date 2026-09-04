@@ -21,7 +21,7 @@ Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 
 
 - **Everything on one row** — nothing wraps, nothing scrolls, and sections you have no data for are simply absent
 - **Colored where it counts** — context and rate-limit percentages go yellow at 50% and red at 80%; a `*` after the branch means uncommitted tracked changes
-- **Two files, no dependencies** — a POSIX `sh` wrapper and one TypeScript file that Bun runs directly. No build, no install step, no `node_modules`
+- **Nothing to install to run it** — a POSIX `sh` wrapper and one TypeScript file that Bun runs directly, with no build step. The only devDependency is `tsc`, which the typecheck and CI use
 - **Never breaks your prompt** — a bad payload or a missing Bun prints one dim line and exits 0, so a crash can never end up in your status line
 
 ## Quick start
@@ -130,17 +130,23 @@ Absent data drops its section rather than rendering a zero or a placeholder, so 
 The status line is a bad place to fail. Claude Code prints whatever the command writes, every line of it, as its own row, so pult treats the payload as hostile:
 
 - Malformed or empty JSON prints `statusline: no payload` and exits 0.
-- A field typed `number` that arrives as a string, `null` or `NaN` drops its section instead of rendering `NaN`.
+- Every field is parsed once, at the boundary. A `number` that arrives as a string, `null` or `NaN` drops its section rather than rendering `NaN`; a percentage over 100 is capped; a negative cost, count or percentage is dropped, since none of them can be one.
+- `fast_mode` has to be the boolean `true`. JSON carries the word, and `"false"` is a non-empty string.
 - Control characters are stripped from every name that gets printed, so a branch or directory named with an escape sequence cannot repaint your terminal or push the line onto a second row.
+- `git` missing from `PATH` costs you the branch, not the line. The status line runs outside your shell profile, where `PATH` is whatever it is.
+- Run by hand with nothing piped in, it tells you how to feed it instead of waiting forever.
 
 ## Tests
 
 ```sh
 bun test                          # whole suite
 bun test -t "survives an empty"   # one test by name
+bun install && bun run typecheck  # the other gate CI runs
 ```
 
 The tests spawn the real script and strip ANSI before asserting, so they read the way your line does. They cover the wrapper too, since that is the part `settings.json` actually names.
+
+The typecheck is the other half: the payload is parsed once into a `Session` whose fields are what they claim, so assigning a raw payload value to one does not compile. Types catch the numbers, tests catch the strings.
 
 ## License
 
