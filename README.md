@@ -133,7 +133,7 @@ The status line is a bad place to fail. Claude Code prints whatever the command 
 - Every field is parsed once, at the boundary. A `number` that arrives as a string, `null` or `NaN` drops its section rather than rendering `NaN`; a percentage over 100 is capped; a negative cost, count or percentage is dropped, since none of them can be one.
 - `fast_mode` has to be the boolean `true`. JSON carries the word, and `"false"` is a non-empty string.
 - Control characters are stripped from every name that gets printed, so a branch or directory named with an escape sequence cannot repaint your terminal or push the line onto a second row.
-- `git` missing from `PATH` costs you the branch, not the line. The status line runs outside your shell profile, where `PATH` is whatever it is. A `git` older than 2.31 (2021) costs you the same, plus the repository name: the one `rev-parse` that answers both asks for absolute paths, which older versions do not offer.
+- `git` missing from `PATH` costs you the branch, not the line. The status line runs outside your shell profile, where `PATH` is whatever it is. A `git` older than 2.31 (2021) costs you the repository name, and only when the payload leaves it out: the `rev-parse` behind that one fact asks for absolute paths, which older versions do not offer. The branch comes from `status` and is unaffected.
 - Run by hand with nothing piped in, it tells you how to feed it instead of waiting forever.
 
 ## Tests

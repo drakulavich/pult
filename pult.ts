@@ -126,34 +126,43 @@ const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 // The common dir is the main repository's .git from a linked worktree as much as
 // from the main tree, so the repository is the directory holding it. A bare repo is
 // the directory: /x/thing.git is "thing", /x/pult/.git is "pult".
-const repoName = (common: string): string | null => {
-  const parts = common.split("/").filter((p) => p !== "");
+const repoName = (common: string | null): string | null => {
+  const parts = (common ?? "").split("/").filter((p) => p !== "");
   const last = parts.pop();
   if (!last) return null;
   return str(last === ".git" ? (parts.pop() ?? null) : last.replace(/\.git$/, "")) || null;
 };
 
-const git = (cwd: string): { branch: string; repo: string | null } | null => {
-  const run = (...a: string[]) => {
-    try {
-      const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
-      return p.exitCode === 0 ? p.stdout.toString().trim() : null;
-    } catch {
-      // No git on PATH. The branch is optional; the line goes on without it.
-      return null;
-    }
-  };
-  // Two answers, one call, per the "one subprocess" rule: the common dir prints
-  // first, the branch second. The flags go before HEAD -- after a non-option
-  // argument, --path-format is fatal rather than ignored.
-  const out = run("rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD");
-  if (!out) return null;
-  const [common = "", head] = out.split("\n");
-  if (!head) return null;
-  const dirty = run("status", "--porcelain", "--untracked-files=no");
-  const branch = str(head + (dirty ? "*" : ""));
-  return branch ? { branch, repo: repoName(common) } : null;
+// Every subprocess the line runs, and the only place it shells out.
+const run = (cwd: string, ...a: string[]): string | null => {
+  try {
+    const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
+    return p.exitCode === 0 ? p.stdout.toString().trim() : null;
+  } catch {
+    // No git on PATH. The branch is optional; the line goes on without it.
+    return null;
+  }
 };
+
+// The one call the line always makes. --porcelain=v2 --branch answers both halves
+// of this segment: "# branch.head <name>", then a line per change, so anything that
+// is not a header means the tree is dirty.
+const branch = (cwd: string): string | null => {
+  const out = run(cwd, "status", "--porcelain=v2", "--branch", "--untracked-files=no");
+  if (out === null) return null;
+  const lines = out.split("\n");
+  const head = lines.find((l) => l.startsWith("# branch.head "))?.slice(14);
+  if (!head) return null;
+  const dirty = lines.some((l) => l !== "" && !l.startsWith("#"));
+  // Detached reads as "(detached)" here and as "HEAD" everywhere else in git.
+  return str((head === "(detached)" ? "HEAD" : head) + (dirty ? "*" : ""));
+};
+
+// The second call, made only when the payload did not name the repository -- the
+// no-remote case #3 was about. status cannot report the common dir (its headers are
+// oid, head, upstream and ab), so this is the fact that costs a subprocess, and it
+// only costs one when it is actually wanted.
+const repoOf = (cwd: string): string | null => repoName(run(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"));
 
 if (process.stdin.isTTY || Bun.argv.includes("--help") || Bun.argv.includes("-h")) {
   console.log(dim(`pult reads the Claude Code session JSON on stdin. Try: echo '{"model":{"display_name":"Opus"}}' | pult`));
@@ -192,14 +201,14 @@ if (s.limits.length) {
   parts.push(s.limits.map(seg).join(dim(" · ")));
 }
 
-const g = git(s.cwd);
+const head = branch(s.cwd);
 // Three names, best first: what the payload said, what git knows, and the directory
 // -- which inside a worktree is the worktree's name, not the repository's. Any of them
 // can come back empty at once: / has no last segment, and a directory named with control
 // characters has nothing left after str(). The colon and the space join two names when
 // there are two, so the line cannot end on ":" or a separator with nothing after it.
-const repo = s.repo ?? g?.repo ?? s.cwd.split("/").pop() ?? "";
-const where = [repo ? dim(repo) : null, g?.branch ?? null].filter((n) => n !== null).join(dim(":"));
+const repo = s.repo ?? repoOf(s.cwd) ?? s.cwd.split("/").pop() ?? "";
+const where = [repo ? dim(repo) : null, head].filter((n) => n !== null).join(dim(":"));
 const wt = s.worktree ? dim(`(wt ${s.worktree})`) : null;
 const seg = [where || null, wt].filter((n) => n !== null).join(" ");
 if (seg) parts.push(seg);
