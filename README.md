@@ -118,10 +118,12 @@ Left to right, with the payload field each section comes from. The fields are do
 | `$4.21 · 1h30` | `cost.total_cost_usd`, `total_duration_ms` | |
 | `+156/-23` | `cost.total_lines_added`, `total_lines_removed` | Hidden when both are zero |
 | `5h 24% · 7d 81% ↻83h19` | `rate_limits.five_hour`, `seven_day` | The `↻` reset time appears once a window has gone yellow, so a quiet session shows percentages alone |
-| `pult:main*` | `workspace.repo.name`, then git | The payload's repo name, else the repository `git` reports, else the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
+| `pult:main*` | `workspace.repo.name`, then git | The payload's repo name, an empty one counting as no name, else the repository `git` reports, else the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
 | `(wt review)` | `worktree.name`, `workspace.git_worktree` | |
 | `PR #1150 pending` | `pr.number`, `pr.review_state` | |
 | `agent explorer` | `agent.name` | |
+
+Every percentage is whole and capped at 100, so the number printed is the one the colour follows, and the one the `↻` reset time appears alongside.
 
 Absent data drops its section rather than rendering a zero or a placeholder, so the line stays short in a fresh session and grows as the session does.
 
