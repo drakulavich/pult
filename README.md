@@ -60,6 +60,53 @@ Windows routes the command through Git Bash and should run the wrapper unchanged
 - It walks its own symlink chain to find `pult.ts` beside itself, so the clone can live anywhere and can be linked onto your `PATH` (`ln -s ~/.claude/pult/pult ~/.local/bin/pult`) if you would rather type `pult`.
 - It looks for `bun` on `PATH`, then `$BUN_INSTALL/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and Linux Homebrew. A status line runs outside your shell profile, where `bun` is often missing even though your terminal finds it fine. When no Bun turns up the line reads `statusline: bun not found` instead of going blank.
 
+## Codex CLI
+
+Codex CLI has its own native status line. It does not invoke Pult or send a
+Claude Code-style JSON payload, so Pult cannot replace the Codex footer.
+
+To get the native Codex line shown below, first open an interactive Codex
+session and enter `/statusline`. Select and order the items in this order:
+
+```toml
+[tui]
+status_line = [
+  "model-with-reasoning",
+  "project-name",
+  "git-branch",
+  "branch-changes",
+  "context-used",
+  "weekly-limit",
+  "used-tokens",
+]
+```
+
+This produces a compact line such as `gpt-5.6-terra high · pult · main · No
+changes · Context 27% used · weekly 77% left · 389K used`. `/statusline` saves
+the same selection to Codex's user configuration, so using the picker is the
+safest way to configure it and preview the result.
+
+The [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+documents `tui.status_line` in `~/.codex/config.toml` as an ordered list of
+Codex-provided footer-item identifiers. The [Codex status-line source](https://github.com/openai/codex/blob/5eea8d0d/codex-rs/tui/src/bottom_pane/status_line_setup.rs#L51-L145)
+defines the available items; Codex may add or change them, so use `/statusline`
+to explore your installed version. Pult never changes this configuration file.
+
+| Pult / Claude Code value | Codex native equivalent | Notes |
+|---|---|---|
+| Model and reasoning effort | `model-with-reasoning` | Native equivalent |
+| Context window and current-session tokens | `context-used`, `context-window-size`, `used-tokens` | The example uses context percentage and session tokens; add window size if useful |
+| Repository and branch | `project-name`, `git-branch` | Native equivalents when available |
+| Pull request | `pull-request-number` | Native equivalent when available |
+| Changed lines | `branch-changes` | Committed branch changes relative to the default branch, not Pult's current-session totals |
+| Estimated cost | `estimated-thread-cost` | Enterprise-only and may be unavailable |
+| 5-hour / 7-day limits | `five-hour-limit`, `weekly-limit` | Codex reports remaining usage; availability is account-dependent |
+| Agent or worktree name | None | No documented equivalent |
+
+Pult does not read `~/.codex` session data, scrape the TUI, modify
+`~/.codex/config.toml`, or use `notify` or hooks to imitate a Codex status-line
+renderer.
+
 ## What the line shows
 
 Left to right, with the payload field each section comes from. The fields are documented at [code.claude.com/docs/en/statusline](https://code.claude.com/docs/en/statusline).
