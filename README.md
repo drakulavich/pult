@@ -53,6 +53,13 @@ Claude Code reads that at startup, so the line appears in your next session. It 
 
 Windows routes the command through Git Bash and should run the wrapper unchanged. Nobody has tried it.
 
+### Why there is a wrapper
+
+`pult` is a small shell script, and it exists so that no absolute path of yours ends up in the install:
+
+- It walks its own symlink chain to find `pult.ts` beside itself, so the clone can live anywhere and can be linked onto your `PATH` (`ln -s ~/.claude/pult/pult ~/.local/bin/pult`) if you would rather type `pult`.
+- It looks for `bun` on `PATH`, then `$BUN_INSTALL/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and Linux Homebrew. A status line runs outside your shell profile, where `bun` is often missing even though your terminal finds it fine. When no Bun turns up the line reads `statusline: bun not found` instead of going blank.
+
 ## Codex CLI
 
 Codex CLI has its own native status line. It does not invoke Pult or send a
@@ -99,13 +106,6 @@ to explore your installed version. Pult never changes this configuration file.
 Pult does not read `~/.codex` session data, scrape the TUI, modify
 `~/.codex/config.toml`, or use `notify` or hooks to imitate a Codex status-line
 renderer.
-
-### Why there is a wrapper
-
-`pult` is a small shell script, and it exists so that no absolute path of yours ends up in the install:
-
-- It walks its own symlink chain to find `pult.ts` beside itself, so the clone can live anywhere and can be linked onto your `PATH` (`ln -s ~/.claude/pult/pult ~/.local/bin/pult`) if you would rather type `pult`.
-- It looks for `bun` on `PATH`, then `$BUN_INSTALL/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and Linux Homebrew. A status line runs outside your shell profile, where `bun` is often missing even though your terminal finds it fine. When no Bun turns up the line reads `statusline: bun not found` instead of going blank.
 
 ## What the line shows
 
