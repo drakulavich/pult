@@ -26,19 +26,22 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 // line as its own row, so control characters go: a directory can be named with
 // an escape sequence or a newline.
 const str = (v: unknown): string | null => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : null);
-const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {});
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {});
 
 const parse = (raw: unknown): Session => {
   const p = obj(raw);
   const model = obj(p.model);
   const workspace = obj(p.workspace);
+  const limits = obj(p.rate_limits);
   const effort = str(obj(p.effort).level);
 
   const cwd = str(workspace.current_dir) ?? str(p.cwd) ?? process.cwd();
 
   const window = (label: string, v: unknown) => {
-    const pct = num(obj(v).used_percentage);
-    return pct === null ? null : { label, pct: Math.round(pct), resets: num(obj(v).resets_at) };
+    const w = obj(v);
+    const pct = num(w.used_percentage);
+    return pct === null ? null : { label, pct: Math.round(pct), resets: num(w.resets_at) };
   };
 
   return {
@@ -47,7 +50,7 @@ const parse = (raw: unknown): Session => {
     context: parseContext(p.context_window),
     cost: parseCost(p.cost),
     lines: parseLines(p.cost),
-    limits: [window("5h", obj(p.rate_limits).five_hour), window("7d", obj(p.rate_limits).seven_day)].filter((w) => w !== null),
+    limits: [window("5h", limits.five_hour), window("7d", limits.seven_day)].filter((w) => w !== null),
     cwd,
     repo: str(obj(workspace.repo).name) ?? cwd.split("/").pop() ?? "",
     worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree),
@@ -57,30 +60,33 @@ const parse = (raw: unknown): Session => {
 };
 
 const parseContext = (v: unknown): Session["context"] => {
-  if (typeof v !== "object" || v === null) return null;
-  const cw = obj(v);
-  const u = cw.current_usage;
-  const used = typeof u === "object" && u !== null ? (num(obj(u).input_tokens) ?? 0) + (num(obj(u).cache_creation_input_tokens) ?? 0) + (num(obj(u).cache_read_input_tokens) ?? 0) : null;
-  const size = num(cw.context_window_size);
-  return { pct: num(cw.used_percentage) ?? (used && size ? Math.round((100 * used) / size) : 0), used, size };
+  if (!isObj(v)) return null;
+  const usage = v.current_usage;
+  const used = isObj(usage)
+    ? (num(usage.input_tokens) ?? 0) + (num(usage.cache_creation_input_tokens) ?? 0) + (num(usage.cache_read_input_tokens) ?? 0)
+    : null;
+  const size = num(v.context_window_size);
+  return { pct: num(v.used_percentage) ?? (used && size ? Math.round((100 * used) / size) : 0), used, size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
-  if (typeof v !== "object" || v === null) return null;
-  const usd = num(obj(v).total_cost_usd);
-  const ms = num(obj(v).total_duration_ms);
+  if (!isObj(v)) return null;
+  const usd = num(v.total_cost_usd);
+  const ms = num(v.total_duration_ms);
   return usd === null && !ms ? null : { usd, ms };
 };
 
 const parseLines = (v: unknown): Session["lines"] => {
-  const added = num(obj(v).total_lines_added) ?? 0;
-  const removed = num(obj(v).total_lines_removed) ?? 0;
+  const cost = obj(v);
+  const added = num(cost.total_lines_added) ?? 0;
+  const removed = num(cost.total_lines_removed) ?? 0;
   return added || removed ? { added, removed } : null;
 };
 
 const parsePr = (v: unknown): Session["pr"] => {
-  const number = num(obj(v).number);
-  return number ? { number, state: str(obj(v).review_state) } : null;
+  const pr = obj(v);
+  const number = num(pr.number);
+  return number ? { number, state: str(pr.review_state) } : null;
 };
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -115,7 +121,7 @@ const git = (cwd: string): string | null => {
 let s: Session;
 try {
   const raw: unknown = JSON.parse(await Bun.stdin.text());
-  if (typeof raw !== "object" || raw === null) throw new Error("not a payload");
+  if (!isObj(raw)) throw new Error("not a payload");
   s = parse(raw);
 } catch {
   console.log(dim("statusline: no payload"));
