@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 .repowise/
 .worktrees/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
