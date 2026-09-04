@@ -12,7 +12,7 @@ type Session = {
   lines: { added: number; removed: number } | null;
   limits: { label: string; pct: number; resets: number | null }[];
   cwd: string;
-  repo: string;
+  repo: string | null;
   worktree: string | null;
   pr: { number: number; state: string | null } | null;
   agent: string | null;
@@ -64,7 +64,7 @@ const parse = (raw: unknown): Session => {
     lines: parseLines(p.cost),
     limits: [window("5h", limits.five_hour), window("7d", limits.seven_day)].filter((w) => w !== null),
     cwd,
-    repo: str(obj(workspace.repo).name) ?? cwd.split("/").pop() ?? "",
+    repo: str(obj(workspace.repo).name),
     worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree),
     pr: parsePr(p.pr),
     agent: str(obj(p.agent).name),
@@ -123,7 +123,17 @@ const dur = (ms: number) => {
 };
 const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 
-const git = (cwd: string): string | null => {
+// The common dir is the main repository's .git from a linked worktree as much as
+// from the main tree, so the repository is the directory holding it. A bare repo is
+// the directory: /x/thing.git is "thing", /x/pult/.git is "pult".
+const repoName = (common: string): string | null => {
+  const parts = common.split("/").filter((p) => p !== "");
+  const last = parts.pop();
+  if (!last) return null;
+  return str(last === ".git" ? (parts.pop() ?? null) : last.replace(/\.git$/, "")) || null;
+};
+
+const git = (cwd: string): { branch: string; repo: string | null } | null => {
   const run = (...a: string[]) => {
     try {
       const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
@@ -133,10 +143,16 @@ const git = (cwd: string): string | null => {
       return null;
     }
   };
-  const branch = run("rev-parse", "--abbrev-ref", "HEAD");
-  if (!branch) return null;
+  // Two answers, one call, per the "one subprocess" rule: the common dir prints
+  // first, the branch second. The flags go before HEAD -- after a non-option
+  // argument, --path-format is fatal rather than ignored.
+  const out = run("rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD");
+  if (!out) return null;
+  const [common = "", head] = out.split("\n");
+  if (!head) return null;
   const dirty = run("status", "--porcelain", "--untracked-files=no");
-  return str(branch + (dirty ? "*" : ""));
+  const branch = str(head + (dirty ? "*" : ""));
+  return branch ? { branch, repo: repoName(common) } : null;
 };
 
 if (process.stdin.isTTY || Bun.argv.includes("--help") || Bun.argv.includes("-h")) {
@@ -176,8 +192,11 @@ if (s.limits.length) {
   parts.push(s.limits.map(seg).join(dim(" · ")));
 }
 
-const branch = git(s.cwd);
-parts.push(dim(s.repo) + (branch ? dim(":") + branch : "") + (s.worktree ? dim(` (wt ${s.worktree})`) : ""));
+const g = git(s.cwd);
+// Three names, best first: what the payload said, what git knows, and the directory
+// -- which inside a worktree is the worktree's name, not the repository's.
+const repo = s.repo ?? g?.repo ?? s.cwd.split("/").pop() ?? "";
+parts.push(dim(repo) + (g ? dim(":") + g.branch : "") + (s.worktree ? dim(` (wt ${s.worktree})`) : ""));
 
 if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state ? dim(` ${s.pr.state}`) : ""));
 if (s.agent) parts.push(dim(`agent ${s.agent}`));

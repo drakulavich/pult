@@ -118,7 +118,7 @@ Left to right, with the payload field each section comes from. The fields are do
 | `$4.21 · 1h30` | `cost.total_cost_usd`, `total_duration_ms` | |
 | `+156/-23` | `cost.total_lines_added`, `total_lines_removed` | Hidden when both are zero |
 | `5h 24% · 7d 81% ↻83h19` | `rate_limits.five_hour`, `seven_day` | The `↻` reset time appears once a window has gone yellow, so a quiet session shows percentages alone |
-| `pult:main*` | `workspace.repo.name`, then git | Repo name, or the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
+| `pult:main*` | `workspace.repo.name`, then git | The payload's repo name, else the repository `git` reports, else the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
 | `(wt review)` | `worktree.name`, `workspace.git_worktree` | |
 | `PR #1150 pending` | `pr.number`, `pr.review_state` | |
 | `agent explorer` | `agent.name` | |
@@ -133,7 +133,7 @@ The status line is a bad place to fail. Claude Code prints whatever the command 
 - Every field is parsed once, at the boundary. A `number` that arrives as a string, `null` or `NaN` drops its section rather than rendering `NaN`; a percentage over 100 is capped; a negative cost, count or percentage is dropped, since none of them can be one.
 - `fast_mode` has to be the boolean `true`. JSON carries the word, and `"false"` is a non-empty string.
 - Control characters are stripped from every name that gets printed, so a branch or directory named with an escape sequence cannot repaint your terminal or push the line onto a second row.
-- `git` missing from `PATH` costs you the branch, not the line. The status line runs outside your shell profile, where `PATH` is whatever it is.
+- `git` missing from `PATH` costs you the branch, not the line. The status line runs outside your shell profile, where `PATH` is whatever it is. A `git` older than 2.31 (2021) costs you the same, plus the repository name: the one `rev-parse` that answers both asks for absolute paths, which older versions do not offer.
 - Run by hand with nothing piped in, it tells you how to feed it instead of waiting forever.
 
 ## Tests
