@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
-// Claude Code statusLine: reads the session JSON on stdin, prints one line.
-// Payload shape: https://code.claude.com/docs/en/statusline
+// Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
 
-// What the line renders. Everything here is already checked: a field that
-// arrived unusable is null or absent, never a string where a number belongs.
+// Already checked: an unusable field is null here, never a string where a number belongs.
 type Session = {
   model: string;
   flags: string[];
@@ -18,25 +16,20 @@ type Session = {
   agent: string | null;
 };
 
-// The boundary. `unknown` stops here: the payload's types say what the sender
-// promised, so a `number` arrives as JSON null, a string, or NaN serialised to
-// null, and a `string` arrives as a number. Below parse(), types are facts.
-// Negative is refused with the rest: a cost, a duration, a count, a percentage
-// and an epoch are all >= 0, so "-5" is a sender bug, not data. It used to
-// render "+-5" in green.
+// The boundary: the payload promises types it does not keep, so a `number` arrives as
+// null, a string or NaN. Negative goes too -- every number here is a count, a cost or
+// an epoch, and "-5" once rendered as "+-5" in green.
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
-// A percentage over 100 says the sender is confused, not that the window is
-// 250% full. Cap it: the line still reads red, and never prints "5h 250%".
+// Capped because senders send 250, rounded because the printed number is the one the
+// colour and the reset time are judged by.
 const percent = (v: unknown): number | null => {
   const n = num(v);
-  return n === null ? null : Math.min(100, n);
+  return n === null ? null : Math.round(Math.min(100, n));
 };
-// A name reaches the terminal verbatim and the status line renders each printed
-// line as its own row, so control characters go: a directory can be named with
-// an escape sequence or a newline.
+// Control characters go: each printed line becomes its own row, and a directory can be
+// named with an escape sequence or a newline.
 const str = (v: unknown): string | null => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : null);
-// A flag is on only when it arrived as the boolean true. JSON carries the word,
-// and every non-empty string is truthy, so "false" used to read as fast.
+// JSON carries the word: "false" is a non-empty string, and those are all truthy.
 const bool = (v: unknown): boolean => v === true;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {});
@@ -53,7 +46,7 @@ const parse = (raw: unknown): Session => {
   const window = (label: string, v: unknown) => {
     const w = obj(v);
     const pct = percent(w.used_percentage);
-    return pct === null ? null : { label, pct: Math.round(pct), resets: num(w.resets_at) };
+    return pct === null ? null : { label, pct, resets: num(w.resets_at) };
   };
 
   return {
@@ -79,10 +72,7 @@ const parseContext = (v: unknown): Session["context"] => {
     : null;
   const size = num(v.context_window_size);
   const computed = used && size ? Math.min(100, (100 * used) / size) : 0;
-  // Rounded once, whichever path supplied it: a payload carrying used_percentage used to
-  // render it verbatim while a computed one was whole, so the same session changed width
-  // with the sender's keys. The printed number is what byLevel colors.
-  return { pct: Math.round(percent(v.used_percentage) ?? computed), used, size };
+  return { pct: percent(v.used_percentage) ?? Math.round(computed), used, size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
@@ -111,7 +101,6 @@ const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
-// The two thresholds the whole line reads from: what turns yellow, and what turns red.
 const YELLOW = 50;
 const RED = 80;
 const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW ? yellow(s) : green(s));
@@ -123,9 +112,8 @@ const dur = (ms: number) => {
 };
 const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 
-// The common dir is the main repository's .git from a linked worktree as much as
-// from the main tree, so the repository is the directory holding it. A bare repo is
-// the directory: /x/thing.git is "thing", /x/pult/.git is "pult".
+// A linked worktree reports the main repository's .git, so the repository is the
+// directory holding it -- except a bare repo, which is the directory itself.
 const repoName = (common: string | null): string | null => {
   const parts = (common ?? "").split("/").filter((p) => p !== "");
   const last = parts.pop();
@@ -139,14 +127,13 @@ const run = (cwd: string, ...a: string[]): string | null => {
     const p = Bun.spawnSync(["git", "-C", cwd, ...a], { stdout: "pipe", stderr: "ignore" });
     return p.exitCode === 0 ? p.stdout.toString().trim() : null;
   } catch {
-    // No git on PATH. The branch is optional; the line goes on without it.
+    // spawnSync throws rather than exiting non-zero when git is not on PATH.
     return null;
   }
 };
 
-// The one call the line always makes. --porcelain=v2 --branch answers both halves
-// of this segment: "# branch.head <name>", then a line per change, so anything that
-// is not a header means the tree is dirty.
+// --porcelain=v2 --branch prints "# branch.head <name>" and then a line per change,
+// so a line that is not a header means the tree is dirty.
 const branch = (cwd: string): string | null => {
   const out = run(cwd, "status", "--porcelain=v2", "--branch", "--untracked-files=no");
   if (out === null) return null;
@@ -154,14 +141,12 @@ const branch = (cwd: string): string | null => {
   const head = lines.find((l) => l.startsWith("# branch.head "))?.slice(14);
   if (!head) return null;
   const dirty = lines.some((l) => l !== "" && !l.startsWith("#"));
-  // Detached reads as "(detached)" here and as "HEAD" everywhere else in git.
+  // git says "(detached)" here and "HEAD" everywhere else.
   return str((head === "(detached)" ? "HEAD" : head) + (dirty ? "*" : ""));
 };
 
-// The second call, made only when the payload did not name the repository -- the
-// no-remote case #3 was about. status cannot report the common dir (its headers are
-// oid, head, upstream and ab), so this is the fact that costs a subprocess, and it
-// only costs one when it is actually wanted.
+// The second call, and the only reason there is one: status cannot report the common
+// dir. Its headers are oid, head, upstream and ab.
 const repoOf = (cwd: string): string | null => repoName(run(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"));
 
 if (process.stdin.isTTY || Bun.argv.includes("--help") || Bun.argv.includes("-h")) {
@@ -202,19 +187,20 @@ if (s.limits.length) {
 }
 
 const head = branch(s.cwd);
-// Three names, best first: what the payload said, what git knows, and the directory
-// -- which inside a worktree is the worktree's name, not the repository's. Any of them
-// can come back empty at once: / has no last segment, and a directory named with control
-// characters has nothing left after str(). The colon and the space join two names when
-// there are two, so the line cannot end on ":" or a separator with nothing after it.
-// rev-parse only earns its subprocess where status has already proved there is a
-// work tree. Outside one it would fail the same way, and that is the ordinary
-// shape of working outside a repository: no repo to identify, so no name sent.
-const repo = s.repo ?? (head !== null ? repoOf(s.cwd) : null) ?? s.cwd.split("/").pop() ?? "";
+
+// A function, not a value: the ?? below decides whether this subprocess runs at all.
+// rev-parse only works where status already found a work tree.
+const fromGit = () => (head !== null ? repoOf(s.cwd) : null);
+
+// Best first. The directory is the worktree's name inside a worktree, not the repo's.
+const repo = s.repo ?? fromGit() ?? s.cwd.split("/").pop() ?? "";
+
+// All three can be empty at once (/, or a name that was only control characters), so
+// the separators join names that exist rather than decorating one that does not.
 const where = [repo ? dim(repo) : null, head].filter((n) => n !== null).join(dim(":"));
 const wt = s.worktree ? dim(`(wt ${s.worktree})`) : null;
-const seg = [where || null, wt].filter((n) => n !== null).join(" ");
-if (seg) parts.push(seg);
+const place = [where || null, wt].filter((n) => n !== null).join(" ");
+if (place) parts.push(place);
 
 if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state ? dim(` ${s.pr.state}`) : ""));
 if (s.agent) parts.push(dim(`agent ${s.agent}`));

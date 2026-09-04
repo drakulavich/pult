@@ -1,6 +1,6 @@
 #!/bin/sh
-# Claude Code statusLine entry point: finds bun, runs pult.ts from this script's
-# own directory, so settings.json needs no path baked into it beyond this file's.
+# statusLine entry point: finds bun, runs pult.ts beside this script, so
+# settings.json needs no path but this file's.
 
 # Follow symlinks by hand: BSD readlink has no -f on older macOS.
 src=$0

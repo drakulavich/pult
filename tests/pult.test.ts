@@ -6,13 +6,16 @@ import { basename, dirname, join, resolve } from "node:path";
 const script = resolve(import.meta.dir, "..", "pult.ts");
 const wrapper = resolve(import.meta.dir, "..", "pult");
 
-async function render(payload: unknown): Promise<{ out: string; raw: string; code: number }> {
-  const proc = Bun.spawn(["bun", script], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+type Env = Record<string, string | undefined>;
+
+async function render(payload: unknown, env?: Env): Promise<{ out: string; raw: string; err: string; code: number }> {
+  const proc = Bun.spawn([process.execPath, script], { stdin: "pipe", stdout: "pipe", stderr: "pipe", ...(env ? { env } : {}) });
   proc.stdin.write(typeof payload === "string" ? payload : JSON.stringify(payload));
   proc.stdin.end();
   const raw = await new Response(proc.stdout).text();
+  const err = await new Response(proc.stderr).text();
   const out = raw.replace(/\x1b\[[0-9;]*m/g, "");
-  return { out, raw, code: await proc.exited };
+  return { out, raw, err, code: await proc.exited };
 }
 
 describe("pult", () => {
@@ -46,8 +49,7 @@ describe("pult", () => {
     }
   });
 
-  // Every field arrives from an upstream JSON schema, so "optional" in the type
-  // is not a guarantee of type at runtime: JSON says null, and keys can change.
+  // "Optional" in the upstream type is not a guarantee of type at runtime.
   test("drops a cost that is not a number instead of crashing", async () => {
     for (const total_cost_usd of [null, "4.21"]) {
       const { out, code } = await render({ model: { display_name: "Opus" }, cost: { total_cost_usd } });
@@ -123,8 +125,6 @@ describe("pult", () => {
     expect(out).not.toContain("+");
   });
 
-  // A reset time only matters once a window is close enough to bite, so it rides
-  // the same yellow threshold the color does.
   test("hides the reset time while a rate-limit window is still green", async () => {
     const { out, code } = await render({
       model: { display_name: "Opus" },
@@ -160,14 +160,11 @@ describe("pult", () => {
       rate_limits: { five_hour: { used_percentage: "x" } },
     });
     expect(code).toBe(0);
-    // The section is dropped whole rather than joining an empty string between
-    // two separators, which read as "Opus │  │ repo".
+    // An empty string joined between two separators reads as "Opus │  │ repo".
     expect(out).not.toMatch(/│\s+│/);
   });
 
   test("treats a fast_mode that is not a boolean as off", async () => {
-    // JSON carries the word, not the value: "false" is a string and every
-    // non-empty one is truthy.
     for (const fast_mode of ["false", "no", 1, {}, []]) {
       const { out, code } = await render({ model: { display_name: "Opus" }, fast_mode });
       expect(code).toBe(0);
@@ -177,23 +174,16 @@ describe("pult", () => {
     expect(out).toContain("fast");
   });
 
-  // Found by exploration: the environment fails in ways the payload cannot.
   test("survives git missing from PATH", async () => {
-    // Bun.spawnSync throws ENOENT rather than returning a non-zero exit, and the
-    // status line runs outside any shell profile, where PATH is whatever it is.
-    const proc = Bun.spawn([process.execPath, script], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, PATH: "/nonexistent" },
-    });
-    proc.stdin.write(JSON.stringify({ model: { display_name: "Opus" }, workspace: { current_dir: "/tmp", repo: { name: "pult" } } }));
-    proc.stdin.end();
-    const raw = await new Response(proc.stdout).text();
-    const err = await new Response(proc.stderr).text();
-    expect(await proc.exited).toBe(0);
+    // spawnSync throws ENOENT rather than exiting non-zero, and a status line runs
+    // outside any shell profile.
+    const { out, err, code } = await render(
+      { model: { display_name: "Opus" }, workspace: { current_dir: "/tmp", repo: { name: "pult" } } },
+      { ...process.env, PATH: "/nonexistent" },
+    );
+    expect(code).toBe(0);
     expect(err).toBe("");
-    expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).toBe("Opus │ pult\n");
+    expect(out).toBe("Opus │ pult\n");
   });
 
   test("says how to use it instead of blocking when asked for help", async () => {
@@ -218,8 +208,6 @@ describe("pult", () => {
     expect(out).not.toMatch(/-\d/);
   });
 
-  // The context percentage is rounded wherever it came from, so the section reads the
-  // same width whether the sender supplied it or it was computed from current_usage.
   test("judges the context window by the percentage it prints, not the one behind it", async () => {
     const { out, raw, code } = await render({
       model: { display_name: "Opus" },
@@ -251,8 +239,7 @@ describe("pult", () => {
   };
   afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
-  // The only tests that need a real repository: the repo name comes from the
-  // directory, and nothing but a worktree makes the two differ.
+  // Only a worktree makes the repository's name and the directory's differ.
   const worktree = () => {
     const base = temp("pult-git-");
     const root = join(base, "pult-fixture");
@@ -265,44 +252,32 @@ describe("pult", () => {
     return tree;
   };
 
-  // The "one subprocess" rule, made checkable: a git that logs itself before
-  // handing over to the real one, so the count is a fact rather than a claim.
+  // A git that logs itself before handing over, so the count is a fact not a claim.
   const spawns = async (payload: unknown): Promise<string[]> => {
     const dir = temp("pult-gitlog-");
     const log = join(dir, "log");
     const bin = join(dir, "bin");
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(bin, "git"), `#!/bin/sh\necho "$*" >> ${log}\nexec ${Bun.which("git")} "$@"\n`, { mode: 0o755 });
-    const proc = Bun.spawn([process.execPath, script], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-    });
-    proc.stdin.write(JSON.stringify(payload));
-    proc.stdin.end();
-    await new Response(proc.stdout).text();
-    await proc.exited;
+    await render(payload, { ...process.env, PATH: `${bin}:${process.env.PATH}` });
     return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
   };
 
-  const root = resolve(import.meta.dir, "..");
+  const repoRoot = resolve(import.meta.dir, "..");
 
   test("shells out once when the payload names the repository", async () => {
-    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: root, repo: { name: "pult" } } });
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: repoRoot, repo: { name: "pult" } } });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("status");
   });
 
   test("pays for a second call only when the repository has no name", async () => {
-    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: root } });
+    const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: repoRoot } });
     expect(calls).toHaveLength(2);
     expect(calls[1]).toContain("rev-parse");
   });
 
-  // Outside a work tree there is no name to fetch, and rev-parse would fail the
-  // same way status just did. Unnamed is the normal shape of that case: Claude
-  // Code sends no repo when there is no repo to identify.
+  // Unnamed is the normal shape outside a repository: nothing to identify, nothing sent.
   test("does not pay for a name where status found no work tree", async () => {
     const calls = await spawns({ model: { display_name: "Opus" }, workspace: { current_dir: temp("pult-plain-") } });
     expect(calls).toHaveLength(1);
@@ -326,13 +301,11 @@ describe("pult", () => {
       workspace: { current_dir: tree, git_worktree: "wt-demo" },
     });
     expect(code).toBe(0);
-    // Not "wt-demo:wt-demo (wt wt-demo)": the repo went missing from the line
-    // exactly where the worktree section says you are somewhere unusual.
+    // Not "wt-demo:wt-demo (wt wt-demo)", which is what the directory would give.
     expect(out).toContain("pult-fixture:wt-demo (wt wt-demo)");
   });
 
-  // Found by exploration: an empty name is a string, so it used to slip past both
-  // fallbacks and print a bare ":main" -- a colon with nothing in front of it.
+  // An empty name is a string, so it used to slip past both fallbacks and print ":main".
   test("treats an empty repo name as absent rather than as a name", async () => {
     const tree = worktree();
     const { out, code } = await render({
@@ -404,9 +377,8 @@ describe("pult", () => {
     expect(out).toContain("Opus");
   });
 
-  // The other direction of the same probe: the absolute fallbacks must still hit.
-  // Nothing else covers them, so a dropped candidate or fumbled quoting would only
-  // ever show up as the "bun not found" test staying green for the wrong reason.
+  // Nothing else covers the absolute fallbacks: a dropped candidate would show up only
+  // as the "bun not found" test staying green for the wrong reason.
   test("the wrapper finds a bun at an absolute fallback path", async () => {
     const root = temp("pult-sysroot-bun-");
     mkdirSync(join(root, "usr", "local", "bin"), { recursive: true });
