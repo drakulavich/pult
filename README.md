@@ -58,28 +58,42 @@ Windows routes the command through Git Bash and should run the wrapper unchanged
 Codex CLI has its own native status line. It does not invoke Pult or send a
 Claude Code-style JSON payload, so Pult cannot replace the Codex footer.
 
-To configure the closest native equivalent:
+To get the native Codex line shown below, first open an interactive Codex
+session and enter `/statusline`. Select and order the items in this order:
 
-1. Start an interactive Codex session with `codex`.
-2. Enter `/statusline`.
-3. Select the Codex-provided items you want. Codex saves that selection in its
-   own user configuration.
+```toml
+[tui]
+status_line = [
+  "model-with-reasoning",
+  "project-name",
+  "git-branch",
+  "branch-changes",
+  "context-used",
+  "weekly-limit",
+  "used-tokens",
+]
+```
+
+This produces a compact line such as `gpt-5.6-terra high · pult · main · No
+changes · Context 27% used · weekly 77% left · 389K used`. `/statusline` saves
+the same selection to Codex's user configuration, so using the picker is the
+safest way to configure it and preview the result.
 
 The [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
 documents `tui.status_line` in `~/.codex/config.toml` as an ordered list of
-Codex-provided footer-item identifiers. Use `/statusline` instead of copying an
-identifier list from Pult: Codex owns which items are available and what they
-mean. Pult never changes this configuration file.
+Codex-provided footer-item identifiers. The [Codex status-line source](https://github.com/openai/codex/blob/5eea8d0d/codex-rs/tui/src/bottom_pane/status_line_setup.rs#L51-L145)
+defines the available items; Codex may add or change them, so use `/statusline`
+to explore your installed version. Pult never changes this configuration file.
 
 | Pult / Claude Code value | Codex native equivalent | Notes |
 |---|---|---|
-| Model and reasoning effort | Model | Native equivalent |
-| Context window | Context | Native equivalent |
-| Repository and branch | Project / branch summary | Native equivalent when available |
-| Pull request | Open PR | Native equivalent when available |
-| Changed lines | Committed branch changes | Similar, not the current dirty diff |
-| Estimated cost | Estimated thread cost | Enterprise-only and may be unavailable |
-| 5-hour / 7-day limits | Usage limits | Account-dependent semantics and availability |
+| Model and reasoning effort | `model-with-reasoning` | Native equivalent |
+| Context window and current-session tokens | `context-used`, `context-window-size`, `used-tokens` | The example uses context percentage and session tokens; add window size if useful |
+| Repository and branch | `project-name`, `git-branch` | Native equivalents when available |
+| Pull request | `pull-request-number` | Native equivalent when available |
+| Changed lines | `branch-changes` | Committed branch changes relative to the default branch, not Pult's current-session totals |
+| Estimated cost | `estimated-thread-cost` | Enterprise-only and may be unavailable |
+| 5-hour / 7-day limits | `five-hour-limit`, `weekly-limit` | Codex reports remaining usage; availability is account-dependent |
 | Agent or worktree name | None | No documented equivalent |
 
 Pult does not read `~/.codex` session data, scrape the TUI, modify

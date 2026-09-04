@@ -12,7 +12,22 @@ Give Pult users a reliable Codex CLI status-line setup without claiming that Pul
 
 The [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) documents `tui.status_line` as an ordered list of Codex's footer item identifiers; `null` disables that footer. The setting is not an executable, plugin entry point, or session-JSON payload hook. Consequently, `status_line.command`, `statusLine.command`, and every equivalent external renderer setting are unsupported.
 
-Users should configure the native footer through `/statusline` in an interactive Codex session. That selector is preferred over Pult hard-coding identifiers, because Codex owns their availability and meaning. Codex persists user-level configuration in `~/.codex/config.toml`, where `tui.status_line` is the documented reference key; Pult must not edit that file.
+Users should configure the native footer through `/statusline` in an interactive Codex session. Codex persists the selection in `~/.codex/config.toml`, where `tui.status_line` is the documented reference key; Pult must not edit that file. The [Codex status-line implementation](https://github.com/openai/codex/blob/5eea8d0d/codex-rs/tui/src/bottom_pane/status_line_setup.rs#L51-L145) is the source for the available item identifiers, which may evolve with Codex.
+
+The verified Pult-like selection is:
+
+```toml
+[tui]
+status_line = [
+  "model-with-reasoning",
+  "project-name",
+  "git-branch",
+  "branch-changes",
+  "context-used",
+  "weekly-limit",
+  "used-tokens",
+]
+```
 
 ## User Story
 
@@ -68,20 +83,20 @@ const numberOrNull = (value: unknown): number | null =>
 
 | Pult / Claude Code value | Codex native equivalent | Notes |
 |---|---|---|
-| Model and reasoning effort | Model | Native equivalent |
-| Context window | Context | Native equivalent |
-| Repository and branch | Project / branch summary | Native equivalent when available |
-| Pull request | Open PR | Native equivalent when available |
-| Changed lines | Committed branch changes | Similar, not the current dirty diff |
-| Estimated cost | Estimated thread cost | Enterprise-only and may be unavailable |
-| 5-hour / 7-day limits | Usage limits | Account-dependent semantics and availability |
+| Model and reasoning effort | `model-with-reasoning` | Native equivalent |
+| Context window and current-session tokens | `context-used`, `context-window-size`, `used-tokens` | Add window size when useful |
+| Repository and branch | `project-name`, `git-branch` | Native equivalents when available |
+| Pull request | `pull-request-number` | Native equivalent when available |
+| Changed lines | `branch-changes` | Committed branch changes relative to the default branch |
+| Estimated cost | `estimated-thread-cost` | Enterprise-only and may be unavailable |
+| 5-hour / 7-day limits | `five-hour-limit`, `weekly-limit` | Remaining usage; account-dependent availability |
 | Agent or worktree name | None | No documented equivalent |
 
 ## Success Criteria
 
 1. The README states that Codex's native status line does not invoke Pult.
-2. It directs users to `/statusline` and links the configuration reference.
-3. It maps native, partial, unavailable, and account-dependent fields.
+2. It directs users to `/statusline`, gives the verified Pult-like item order, and links the configuration reference.
+3. It maps native, partial, unavailable, and account-dependent fields by item ID.
 4. No Pult code or installation step reads private Codex data or modifies `~/.codex/config.toml`.
 5. `bun test` passes unchanged.
 

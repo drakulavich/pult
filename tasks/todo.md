@@ -5,9 +5,9 @@
   - Verify: `rg -n 'tui.status_line|status_line.command|/statusline' spec/SPEC-codex-cli.md`
 
 - [x] Task 2: Add the Codex CLI guide, field mapping, and requested `AGENTS.md` instruction.
-  - Acceptance: the `/statusline` setup, native limits, Pult non-goals, and the exact project instruction are explicit.
-  - Verify: `rg -n 'Codex CLI|/statusline|tui\.status_line' README.md && sed -n '1p' AGENTS.md`
+  - Acceptance: the `/statusline` setup, verified native item order, Pult non-goals, and the exact project instruction are explicit.
+  - Verify: `rg -n 'Codex CLI|/statusline|model-with-reasoning|tui\.status_line' README.md && sed -n '1p' AGENTS.md`
 
-- [ ] Task 3: Verify docs-only scope and existing Claude Code behavior.
+- [x] Task 3: Verify docs-only scope and existing Claude Code behavior.
   - Acceptance: all Pult tests pass; no renderer, dependency, or user config changes.
   - Verify: `git diff --check && bun test`
