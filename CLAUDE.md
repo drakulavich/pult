@@ -1,34 +1,25 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Every line below traces to a mistake someone actually made here. If something in
+this project surprises or confuses you, say so in your reply rather than coding
+around it: that is how a line earns its place, or how the code earns a fix.
 
-## Commands
+- **Never fail loudly.** Claude Code renders whatever the command prints, so a
+  malformed payload or a missing `bun` prints one dim line and exits 0. This has
+  been broken twice: a non-string `display_name` threw out of `plain()`, and a
+  non-string `cwd` threw out of `cwd.split()`. Both printed a stack trace where
+  the status line goes.
+- **Every payload field goes through `num()` or `str()`.** The type says what the
+  sender promised, not what arrives; a `number` shows up as JSON null or a string.
+  Reading `p.cost.total_cost_usd` directly is the bug those two exist to prevent.
+  A field that is absent or unusable drops its whole section rather than
+  rendering a zero, a placeholder, or `NaN`.
+- **One subprocess.** The line re-renders every `refreshInterval` seconds and
+  `git()` is the only thing it shells out to. Wanting a second git fact means
+  adding arguments to that one `rev-parse`, not a second call (see #3).
+- **The main test pins the whole rendered line as one regex.** When it fails,
+  decide whether the new line is right and update the regex deliberately. It is
+  not flake, and it is the only thing watching the output as a whole.
 
-```sh
-bun test                                  # whole suite
-bun test -t "survives an empty"           # one test by name
-echo '{"model":{"display_name":"Opus"}}' | ./pult   # render a payload by hand
-```
-
-There is no build, no lint, and no dependency install — Bun runs `pult.ts` directly.
-
-## Architecture
-
-Two files do the work:
-
-- `pult` — POSIX `sh` wrapper, the entry point named in `settings.json` (as `~/.claude/pult/pult`; Claude Code runs `command` through a shell, so `~` expands). It resolves its own symlink chain to locate `pult.ts` beside it, and falls back to `$BUN_INSTALL/bin`, `~/.bun/bin`, Homebrew and `/usr/local/bin` when `bun` is not on `PATH`. Both exist so no user's absolute paths end up in the install: the clone may live anywhere, and a status line runs outside any shell profile, where `bun` is often absent from `PATH`. `$PULT_SYSROOT` prefixes the three absolute fallbacks and is empty in normal use; it exists because no `HOME` or `PATH` override can hide a real `/opt/homebrew/bin/bun`, so without it the "bun not found" branch is untestable on a Mac and passes in CI only because Linux runners happen to lack those paths.
-- `pult.ts` — reads the session JSON on stdin, appends each populated section to `parts`, and prints `parts.join(" │ ")`. One pass, top to bottom, no framework.
-
-Constraints that shape the code:
-
-- **Never fail loudly.** Claude Code renders whatever the command prints. A malformed payload or a missing `bun` prints one dim line and exits 0; a nonzero exit or a stack trace would land in the user's status line.
-- **Absent means omitted.** Every field of `Payload` is optional and comes from an upstream schema (<https://code.claude.com/docs/en/statusline>) that can gain or drop keys. Missing data drops its whole section rather than rendering a placeholder or a zero.
-- **Cheap.** It re-runs every `refreshInterval` seconds. `git()` is the only subprocess; keep it that way.
-
-The `YELLOW` and `RED` constants are the single place the 50 / 80 thresholds live. `byLevel` colors by them, and the rate-limit segment reads `YELLOW` too: a reset time is only printed once its window has gone yellow.
-
-Two helpers hold the payload boundary, and every field must come through one of them: `num()` for a field typed `number`, `str()` for one typed `string`. Both return `null` for anything else, because the type only describes what the sender promised — a `number` arrives as JSON `null`, a string, or `NaN` serialised to null, and a `string` arrives as a number. `str()` also strips control characters, because a directory can be named with an escape sequence or a newline and the status line renders each printed line as its own row. Reading a payload field directly is the bug these two exist to prevent.
-
-## Tests
-
-`tests/pult.test.ts` spawns the real script and strips ANSI before asserting, so tests read as the user's line. The main test pins the full rendered line as one regex — changing field order or separators means updating that regex deliberately.
+There is no build, no lint, and no dependency install; Bun runs `pult.ts`
+directly.
