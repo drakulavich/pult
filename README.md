@@ -16,7 +16,7 @@
 A busier session fills in the rest — a reset time once a window has gone yellow, and the pull request you are on:
 
 ```
-Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 81% ↻83h19 │ kesha-voice-kit:main │ PR #1150 pending
+Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 81% ↻83h19 │ kesha-voice-kit:main │ PR #1150 approved
 ```
 
 - **Everything on one row** — nothing wraps, nothing scrolls, and sections you have no data for are simply absent
@@ -120,7 +120,7 @@ Left to right, with the payload field each section comes from. The fields are do
 | `5h 24% · 7d 81% ↻83h19` | `rate_limits.five_hour`, `seven_day` | The `↻` reset time appears once a window has gone yellow, so a quiet session shows percentages alone |
 | `pult:main*` | `workspace.repo.name`, then git | The payload's repo name, an empty one counting as no name, else the repository `git` reports, else the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
 | `(wt review)` | `worktree.name`, `workspace.git_worktree` | Collapses to `(wt)` when the worktree is named after the branch already shown. Both fields are names, so either prints whole; an empty one counts as no name |
-| `PR #1150 pending` | `pr.number`, `pr.review_state` | |
+| `PR #1150 approved` | `pr.number`, `pr.review_state` | The state is printed only when it asks for something: `approved` green, `changes_requested` red, `draft` dim. A `pending` review, which is most of them, leaves the number alone |
 | `agent explorer` | `agent.name` | |
 
 Every percentage is whole and capped at 100, so the number printed is the one the colour follows, and the one the `↻` reset time appears alongside.
