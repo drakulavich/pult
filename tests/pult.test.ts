@@ -379,6 +379,27 @@ describe("pult", () => {
     expect(out.trim()).toBe("Opus │ (wt review)");
   });
 
+  // repo already learned this: an empty string is a string, so ?? walks past the
+  // fallback and the section vanishes instead of falling through to the path.
+  test("treats an empty worktree name as absent rather than as a name", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: "/", git_worktree: "review" },
+      worktree: { name: "" },
+    });
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ (wt review)");
+  });
+
+  test("shows the last segment of a worktree path that uses backslashes", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: "/", git_worktree: "C:\\Users\\a\\worktrees\\review" },
+    });
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ (wt review)");
+  });
+
   test("keeps the payload's repo name ahead of the one git knows", async () => {
     const tree = worktree();
     const { out, code } = await render({
