@@ -59,8 +59,11 @@ const parse = (raw: unknown): Session => {
     cwd,
     repo: str(obj(workspace.repo).name) || null,
     // git_worktree is a path where the name is not, and a whole path would crowd out
-    // everything after it, so only the last segment survives.
-    worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree)?.split("/").filter((seg) => seg !== "").pop() ?? null,
+    // everything after it, so only the last segment survives. Backslash counts as a
+    // separator for the Windows shape; a POSIX name containing one loses its head,
+    // which is a smaller loss than a drive letter pushing the row off the screen.
+    // || not ??, because an empty name is a string and would swallow the fallback.
+    worktree: str(obj(p.worktree).name) || str(workspace.git_worktree)?.split(/[/\\]/).filter((seg) => seg !== "").pop() || null,
     pr: parsePr(p.pr),
     agent: str(obj(p.agent).name),
   };
