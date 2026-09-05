@@ -203,7 +203,7 @@ const where = [repo ? dim(repo) : null, head].filter((n) => n !== null).join(dim
 // A worktree is normally named after its branch, and git keeps a branch in one worktree
 // at a time, so repeating the name says nothing the branch has not. The dirty marker comes
 // off before comparing, which cannot hide a branch because git forbids "*" in a ref name.
-const named = s.worktree !== null && s.worktree === head?.replace(/\*$/, "");
+const named = s.worktree === head?.replace(/\*$/, "");
 const wt = s.worktree ? dim(named ? "(wt)" : `(wt ${s.worktree})`) : null;
 const place = [where || null, wt].filter((n) => n !== null).join(" ");
 if (place) parts.push(place);
