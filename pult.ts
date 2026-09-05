@@ -208,7 +208,11 @@ const wt = s.worktree ? dim(named ? "(wt)" : `(wt ${s.worktree})`) : null;
 const place = [where || null, wt].filter((n) => n !== null).join(" ");
 if (place) parts.push(place);
 
-if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state ? dim(` ${s.pr.state}`) : ""));
+// pending is every open PR nobody has looked at yet: true almost always, and eight
+// columns to say so. The other three each ask for something, so they keep their width
+// and take a colour from what they ask for. An undocumented state is still news.
+const prState = (state: string) => (state === "approved" ? green(state) : state === "changes_requested" ? red(state) : dim(state));
+if (s.pr) parts.push(`PR #${s.pr.number}` + (s.pr.state && s.pr.state !== "pending" ? ` ${prState(s.pr.state)}` : ""));
 if (s.agent) parts.push(dim(`agent ${s.agent}`));
 
 console.log(parts.join(dim(" │ ")));

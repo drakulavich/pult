@@ -32,7 +32,7 @@ describe("pult", () => {
       pr: { number: 1150, review_state: "pending" },
     });
     expect(code).toBe(0);
-    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻83h\d\d │ kesha-voice-kit(:\S+)? │ PR #1150 pending$/);
+    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻83h\d\d │ kesha-voice-kit(:\S+)? │ PR #1150$/);
   });
 
   test("leaves absent sections out instead of printing placeholders", async () => {
@@ -84,6 +84,29 @@ describe("pult", () => {
     expect(code).toBe(0);
     expect(raw.trimEnd().split("\n")).toHaveLength(1);
     expect(raw.replace(/\x1b\[[0-9;]*m/g, "")).not.toContain("\x1b");
+  });
+
+  // pending is every open PR nobody has looked at yet, so it is true almost always and
+  // costs eight columns to say nothing. The other three each ask for something.
+  test("drops a pending review state but keeps the number", async () => {
+    const { out, code } = await render({ model: { display_name: "Opus" }, pr: { number: 21, review_state: "pending" } });
+    expect(code).toBe(0);
+    // The last section, not the whole line: a branch named "...pending..." renders here too.
+    expect(out.trim().split(" │ ").at(-1)).toBe("PR #21");
+  });
+
+  test("keeps a review state that asks for something", async () => {
+    for (const state of ["approved", "changes_requested", "draft"]) {
+      const { out, code } = await render({ model: { display_name: "Opus" }, pr: { number: 21, review_state: state } });
+      expect(code).toBe(0);
+      expect(out).toContain(`PR #21 ${state}`);
+    }
+  });
+
+  // The documented set can grow, and an unknown state is still news.
+  test("keeps a review state it has no colour for", async () => {
+    const { out } = await render({ model: { display_name: "Opus" }, pr: { number: 21, review_state: "queued" } });
+    expect(out).toContain("PR #21 queued");
   });
 
   test("survives a name that arrives as something other than a string", async () => {
