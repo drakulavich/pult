@@ -301,8 +301,8 @@ describe("pult", () => {
       workspace: { current_dir: tree, git_worktree: "wt-demo" },
     });
     expect(code).toBe(0);
-    // Not "wt-demo:wt-demo (wt wt-demo)", which is what the directory would give.
-    expect(out).toContain("pult-fixture:wt-demo (wt wt-demo)");
+    // Not "wt-demo:wt-demo", which is what the directory would give.
+    expect(out).toContain("pult-fixture:wt-demo (wt)");
   });
 
   // An empty name is a string, so it used to slip past both fallbacks and print ":main".
@@ -326,6 +326,55 @@ describe("pult", () => {
 
   test("keeps the worktree alone rather than spacing it off an empty name", async () => {
     const { out, code } = await render({ model: { display_name: "Opus" }, workspace: { current_dir: "/", git_worktree: "review" } });
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ (wt review)");
+  });
+
+  test("marks a worktree instead of repeating the branch it is named after", async () => {
+    const tree = worktree();
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: tree, repo: { name: "kesha-voice-kit" } },
+      worktree: { name: "wt-demo" },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("kesha-voice-kit:wt-demo (wt)");
+    expect(out).not.toContain("(wt wt-demo)");
+  });
+
+  // The dirty marker rides on the branch, so comparing the two raw misses here.
+  test("marks a worktree named after a branch that has uncommitted changes", async () => {
+    const tree = worktree();
+    const git = (...a: string[]) => Bun.spawnSync(["git", "-C", tree, ...a], { stdout: "ignore", stderr: "ignore" });
+    writeFileSync(join(tree, "f.txt"), "one");
+    git("add", "f.txt");
+    git("-c", "user.email=pult@example.com", "-c", "user.name=pult", "commit", "-q", "-m", "add");
+    writeFileSync(join(tree, "f.txt"), "two");
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: tree, repo: { name: "kesha-voice-kit" } },
+      worktree: { name: "wt-demo" },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("kesha-voice-kit:wt-demo* (wt)");
+  });
+
+  test("keeps a worktree name that differs from the branch", async () => {
+    const tree = worktree();
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: tree, repo: { name: "kesha-voice-kit" } },
+      worktree: { name: "hotfix" },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("kesha-voice-kit:wt-demo (wt hotfix)");
+  });
+
+  test("shows only the last segment of a worktree path", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      workspace: { current_dir: "/", git_worktree: "/Users/anton/worktrees/review/" },
+    });
     expect(code).toBe(0);
     expect(out.trim()).toBe("Opus │ (wt review)");
   });

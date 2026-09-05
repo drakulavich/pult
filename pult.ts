@@ -58,7 +58,9 @@ const parse = (raw: unknown): Session => {
     limits: [window("5h", limits.five_hour), window("7d", limits.seven_day)].filter((w) => w !== null),
     cwd,
     repo: str(obj(workspace.repo).name) || null,
-    worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree),
+    // git_worktree is a path where the name is not, and a whole path would crowd out
+    // everything after it, so only the last segment survives.
+    worktree: str(obj(p.worktree).name) ?? str(workspace.git_worktree)?.split("/").filter((seg) => seg !== "").pop() ?? null,
     pr: parsePr(p.pr),
     agent: str(obj(p.agent).name),
   };
@@ -198,7 +200,11 @@ const repo = s.repo ?? fromGit() ?? s.cwd.split("/").pop() ?? "";
 // All three can be empty at once (/, or a name that was only control characters), so
 // the separators join names that exist rather than decorating one that does not.
 const where = [repo ? dim(repo) : null, head].filter((n) => n !== null).join(dim(":"));
-const wt = s.worktree ? dim(`(wt ${s.worktree})`) : null;
+// A worktree is normally named after its branch, and git keeps a branch in one worktree
+// at a time, so repeating the name says nothing the branch has not. The dirty marker comes
+// off before comparing, which cannot hide a branch because git forbids "*" in a ref name.
+const named = s.worktree !== null && s.worktree === head?.replace(/\*$/, "");
+const wt = s.worktree ? dim(named ? "(wt)" : `(wt ${s.worktree})`) : null;
 const place = [where || null, wt].filter((n) => n !== null).join(" ");
 if (place) parts.push(place);
 
