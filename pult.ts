@@ -108,10 +108,15 @@ const RED = 80;
 const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW ? yellow(s) : green(s));
 
 const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+// Each unit up drops the one two below: hours lose seconds, days lose minutes.
 const dur = (ms: number) => {
   const m = Math.floor(ms / 60000);
-  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h >= 24) return `${Math.floor(h / 24)}d${h % 24}h`;
+  return h ? `${h}h${String(m % 60).padStart(2, "0")}` : `${m}m`;
 };
+// Cents matter under a thousand dollars; over it the tenth does.
+const usd = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(2)}`);
 const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 
 // A linked worktree reports the main repository's .git, so the repository is the
@@ -176,7 +181,7 @@ if (s.context) {
 }
 
 if (s.cost) {
-  const bits = [s.cost.usd !== null ? `$${s.cost.usd.toFixed(2)}` : null, s.cost.ms ? dur(s.cost.ms) : null].filter((b) => b !== null);
+  const bits = [s.cost.usd !== null ? usd(s.cost.usd) : null, s.cost.ms ? dur(s.cost.ms) : null].filter((b) => b !== null);
   parts.push(bits.join(dim(" · ")));
 }
 

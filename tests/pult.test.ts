@@ -32,7 +32,7 @@ describe("pult", () => {
       pr: { number: 1150, review_state: "pending" },
     });
     expect(code).toBe(0);
-    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻83h\d\d │ kesha-voice-kit(:\S+)? │ PR #1150$/);
+    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit(:\S+)? │ PR #1150$/);
   });
 
   test("leaves absent sections out instead of printing placeholders", async () => {
@@ -229,6 +229,31 @@ describe("pult", () => {
     expect(out).not.toContain("5h");
     expect(out).not.toContain("+");
     expect(out).not.toMatch(/-\d/);
+  });
+
+  // A session that has run for days is the one whose cost and length are hardest to
+  // read at full width, so both shorten once they cross a thousand dollars or a day.
+  test("shortens a cost from a thousand dollars and a duration from a day", async () => {
+    const cases: [number, number, string][] = [
+      [999.994, 86_399_000, "$999.99 · 23h59"],
+      [1000, 86_400_000, "$1.0k · 1d0h"],
+      [1005.13, 647_000_000, "$1.0k · 7d11h"],
+      [12_345, 90_000_000, "$12.3k · 1d1h"],
+    ];
+    for (const [total_cost_usd, total_duration_ms, want] of cases) {
+      const { out, code } = await render({ model: { display_name: "Opus" }, cost: { total_cost_usd, total_duration_ms } });
+      expect(code).toBe(0);
+      expect(out).toContain(want);
+    }
+  });
+
+  test("counts a reset that is days away in days too", async () => {
+    const { out, code } = await render({
+      model: { display_name: "Opus" },
+      rate_limits: { seven_day: { used_percentage: 81, resets_at: Math.floor(Date.now() / 1000) + 6 * 86_400 + 23 * 3600 + 30 * 60 } },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("7d 81% ↻6d23h");
   });
 
   test("judges the context window by the percentage it prints, not the one behind it", async () => {
