@@ -5,7 +5,7 @@
 type Session = {
   model: string;
   flags: string[];
-  context: { pct: number; used: number | null; size: number | null } | null;
+  context: { pct: number; size: number | null } | null;
   cost: { usd: number | null; ms: number | null } | null;
   lines: { added: number; removed: number } | null;
   limits: { label: string; pct: number; resets: number | null }[];
@@ -74,7 +74,7 @@ const parseContext = (v: unknown): Session["context"] => {
     : null;
   const size = num(v.context_window_size);
   const computed = used && size ? Math.min(100, (100 * used) / size) : 0;
-  return { pct: percent(v.used_percentage) ?? Math.round(computed), used, size };
+  return { pct: percent(v.used_percentage) ?? Math.round(computed), size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
@@ -175,10 +175,9 @@ const parts: string[] = [];
 
 parts.push(bold(cyan(s.model)) + (s.flags.length ? dim(` ${s.flags.join(",")}`) : ""));
 
-if (s.context) {
-  const suffix = s.context.size ? `/${k(s.context.size)}` : "";
-  parts.push(byLevel(s.context.pct, `ctx ${s.context.pct}%`) + dim(s.context.used !== null ? ` ${k(s.context.used)}${suffix}` : suffix));
-}
+// The window size is what the percentage is of, and the difference between a 200k and
+// a 1M session. The token count is their product and is not printed.
+if (s.context) parts.push(byLevel(s.context.pct, `ctx ${s.context.pct}%`) + (s.context.size ? dim(` of ${k(s.context.size)}`) : ""));
 
 if (s.cost) {
   const bits = [s.cost.usd !== null ? usd(s.cost.usd) : null, s.cost.ms ? dur(s.cost.ms) : null].filter((b) => b !== null);

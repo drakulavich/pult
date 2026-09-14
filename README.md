@@ -16,7 +16,7 @@
 A busier session fills in the rest — a reset time once a window has gone yellow, and the pull request you are on:
 
 ```
-Fable 5.1 │ ctx 41% 414k/1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit:main │ PR #1150 approved
+Fable 5.1 │ ctx 41% of 1.0M │ $4.21 · 1h30 │ +156/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit:main │ PR #1150 approved
 ```
 
 - **Everything on one row** — nothing wraps, nothing scrolls, and sections you have no data for are simply absent
@@ -114,7 +114,7 @@ Left to right, with the payload field each section comes from. The fields are do
 | Section | Comes from | Notes |
 |---|---|---|
 | `Fable 5.1 fast,low` | `model.display_name` | Falls back to `model.id`, then `?`. Appends `fast` and the effort level unless it is `high` |
-| `ctx 41% 414k/1.0M` | `context_window` | Uses `used_percentage` when the payload has it, otherwise adds up `current_usage` against the window size |
+| `ctx 41% of 1.0M` | `context_window` | Uses `used_percentage` when the payload has it, otherwise adds up `current_usage` against the window size. The size is printed, the token count is not |
 | `$4.21 · 1h30` | `cost.total_cost_usd`, `total_duration_ms` | A thousand dollars becomes `$1.0k`, a day becomes `1d0h`; the minutes go with it |
 | `+156/-23` | `cost.total_lines_added`, `total_lines_removed` | Hidden when both are zero |
 | `5h 24% · 7d 81% ↻3d11h` | `rate_limits.five_hour`, `seven_day` | The `↻` reset time appears once a window has gone yellow, so a quiet session shows percentages alone |
