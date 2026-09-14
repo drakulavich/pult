@@ -32,7 +32,7 @@ describe("pult", () => {
       pr: { number: 1150, review_state: "pending" },
     });
     expect(code).toBe(0);
-    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit(:\S+)? │ PR #1150$/);
+    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% of 1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit(:\S+)? │ PR #1150$/);
   });
 
   test("leaves absent sections out instead of printing placeholders", async () => {
@@ -146,6 +146,16 @@ describe("pult", () => {
     expect(raw.trimEnd().split("\n")).toHaveLength(1);
     expect(out).not.toContain("NaN");
     expect(out).not.toContain("+");
+  });
+
+  // The window size says what the percentage is of; the used count is that product and
+  // is not printed. Without a size the percentage stands alone, no "of" trailing it.
+  test("names the window the percentage is of, and only when there is one", async () => {
+    const sized = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, context_window_size: 200_000 } });
+    expect(sized.out).toContain("ctx 9% of 200k │");
+    const unsized = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, current_usage: { input_tokens: 18_000 } } });
+    expect(unsized.out).toContain("ctx 9% │");
+    expect(unsized.out).not.toContain("18k");
   });
 
   test("hides the reset time while a rate-limit window is still green", async () => {
