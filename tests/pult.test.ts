@@ -153,6 +153,9 @@ describe("pult", () => {
   test("names the window the percentage is of, and only when there is one", async () => {
     const sized = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, context_window_size: 200_000 } });
     expect(sized.out).toContain("ctx 9% of 200k │");
+    // Rounds up to a thousand thousands, so it is judged as a million: never 1000k.
+    const almost = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, context_window_size: 999_999 } });
+    expect(almost.out).toContain("ctx 9% of 1.0M │");
     const unsized = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, current_usage: { input_tokens: 18_000 } } });
     expect(unsized.out).toContain("ctx 9% │");
     expect(unsized.out).not.toContain("18k");
@@ -246,6 +249,8 @@ describe("pult", () => {
   test("shortens a cost from a thousand dollars and a duration from a day", async () => {
     const cases: [number, number, string][] = [
       [999.994, 86_399_000, "$999.99 · 23h59"],
+      // Rounds up to a thousand, so it is judged as one: never $1000.00.
+      [999.995, 86_399_000, "$1.0k · 23h59"],
       [1000, 86_400_000, "$1.0k · 1d0h"],
       [1005.13, 647_000_000, "$1.0k · 7d11h"],
       [12_345, 90_000_000, "$12.3k · 1d1h"],
