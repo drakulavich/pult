@@ -109,9 +109,13 @@ const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW
 
 // One decimal, unless it is a zero: 1.2M and 1M, never 1.0M.
 const tenth = (n: number) => n.toFixed(1).replace(/\.0$/, "");
-// Both judge the number they would print, not the one they were given: 999_999 rounds
-// to a thousand thousands and is a million, 999.995 to a thousand dollars and is $1k.
-const k = (n: number) => (Math.round(n / 1000) >= 1000 ? `${tenth(n / 1_000_000)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+// Both judge the number they would print, not the one they were given: 999_950 would
+// print as 1000.0k and is a million, 999.995 as a thousand dollars and is $1k.
+const k = (n: number) => {
+  if (Number(tenth(n / 1000)) >= 1000) return `${tenth(n / 1_000_000)}M`;
+  if (n >= 1000) return `${tenth(n / 1000)}k`;
+  return `${n}`;
+};
 // Each unit up drops the one two below: hours lose seconds, days lose minutes.
 const dur = (ms: number) => {
   const m = Math.floor(ms / 60000);

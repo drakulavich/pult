@@ -262,11 +262,14 @@ describe("pult", () => {
     }
   });
 
-  test("counts changed lines in thousands from a thousand, each side on its own", async () => {
+  // Thousands to a tenth, like the cost: 2.5k, not 3k. Each side judges itself, and a
+  // million is judged by what the k branch would print: 999_950 is 1000.0k, so it is 1M.
+  test("counts changed lines in thousands to a tenth from a thousand, each side on its own", async () => {
     const cases: [number, number, string][] = [
       [999, 348, "+999/-348"],
-      [11_108, 348, "+11k/-348"],
-      [156, 2_500, "+156/-3k"],
+      [156, 2_500, "+156/-2.5k"],
+      [11_108, 348, "+11.1k/-348"],
+      [999_949, 999_950, "+999.9k/-1M"],
       [1_234_567, 0, "+1.2M/-0"],
     ];
     for (const [total_lines_added, total_lines_removed, want] of cases) {
