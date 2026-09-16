@@ -5,7 +5,7 @@
 type Session = {
   model: string;
   flags: string[];
-  context: { pct: number; used: number | null; size: number | null } | null;
+  context: { pct: number; size: number | null } | null;
   cost: { usd: number | null; ms: number | null } | null;
   lines: { added: number; removed: number } | null;
   limits: { label: string; pct: number; resets: number | null }[];
@@ -74,7 +74,7 @@ const parseContext = (v: unknown): Session["context"] => {
     : null;
   const size = num(v.context_window_size);
   const computed = used && size ? Math.min(100, (100 * used) / size) : 0;
-  return { pct: percent(v.used_percentage) ?? Math.round(computed), used, size };
+  return { pct: percent(v.used_percentage) ?? Math.round(computed), size };
 };
 
 const parseCost = (v: unknown): Session["cost"] => {
@@ -107,7 +107,15 @@ const YELLOW = 50;
 const RED = 80;
 const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW ? yellow(s) : green(s));
 
-const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+// One decimal, unless it is a zero: 1.2M and 1M, never 1.0M.
+const tenth = (n: number) => n.toFixed(1).replace(/\.0$/, "");
+// Both judge the number they would print, not the one they were given: 999_950 would
+// print as 1000.0k and is a million, 999.995 as a thousand dollars and is $1k.
+const k = (n: number) => {
+  if (Number(tenth(n / 1000)) >= 1000) return `${tenth(n / 1_000_000)}M`;
+  if (n >= 1000) return `${tenth(n / 1000)}k`;
+  return `${n}`;
+};
 // Each unit up drops the one two below: hours lose seconds, days lose minutes.
 const dur = (ms: number) => {
   const m = Math.floor(ms / 60000);
@@ -116,7 +124,7 @@ const dur = (ms: number) => {
   return h ? `${h}h${String(m % 60).padStart(2, "0")}` : `${m}m`;
 };
 // Cents matter under a thousand dollars; over it the tenth does.
-const usd = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(2)}`);
+const usd = (n: number) => (Number(n.toFixed(2)) >= 1000 ? `$${tenth(n / 1000)}k` : `$${n.toFixed(2)}`);
 const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 
 // A linked worktree reports the main repository's .git, so the repository is the
@@ -175,17 +183,16 @@ const parts: string[] = [];
 
 parts.push(bold(cyan(s.model)) + (s.flags.length ? dim(` ${s.flags.join(",")}`) : ""));
 
-if (s.context) {
-  const suffix = s.context.size ? `/${k(s.context.size)}` : "";
-  parts.push(byLevel(s.context.pct, `ctx ${s.context.pct}%`) + dim(s.context.used !== null ? ` ${k(s.context.used)}${suffix}` : suffix));
-}
+// The window size is what the percentage is of, and the difference between a 200k and
+// a 1M session. The token count is their product and is not printed.
+if (s.context) parts.push(byLevel(s.context.pct, `ctx ${s.context.pct}%`) + (s.context.size ? dim(` of ${k(s.context.size)}`) : ""));
 
 if (s.cost) {
   const bits = [s.cost.usd !== null ? usd(s.cost.usd) : null, s.cost.ms ? dur(s.cost.ms) : null].filter((b) => b !== null);
   parts.push(bits.join(dim(" · ")));
 }
 
-if (s.lines) parts.push(green(`+${s.lines.added}`) + dim("/") + red(`-${s.lines.removed}`));
+if (s.lines) parts.push(green(`+${k(s.lines.added)}`) + dim("/") + red(`-${k(s.lines.removed)}`));
 
 if (s.limits.length) {
   // A reset time is only worth its width once the window is close enough to bite.

@@ -32,7 +32,7 @@ describe("pult", () => {
       pr: { number: 1150, review_state: "pending" },
     });
     expect(code).toBe(0);
-    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% 414k\/1\.0M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit(:\S+)? │ PR #1150$/);
+    expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% of 1M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit(:\S+)? │ PR #1150$/);
   });
 
   test("leaves absent sections out instead of printing placeholders", async () => {
@@ -148,6 +148,19 @@ describe("pult", () => {
     expect(out).not.toContain("+");
   });
 
+  // The window size says what the percentage is of; the used count is that product and
+  // is not printed. Without a size the percentage stands alone, no "of" trailing it.
+  test("names the window the percentage is of, and only when there is one", async () => {
+    const sized = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, context_window_size: 200_000 } });
+    expect(sized.out).toContain("ctx 9% of 200k │");
+    // Rounds up to a thousand thousands, so it is judged as a million: never 1000k.
+    const almost = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, context_window_size: 999_999 } });
+    expect(almost.out).toContain("ctx 9% of 1M │");
+    const unsized = await render({ model: { display_name: "Opus" }, context_window: { used_percentage: 9, current_usage: { input_tokens: 18_000 } } });
+    expect(unsized.out).toContain("ctx 9% │");
+    expect(unsized.out).not.toContain("18k");
+  });
+
   test("hides the reset time while a rate-limit window is still green", async () => {
     const { out, code } = await render({
       model: { display_name: "Opus" },
@@ -236,12 +249,31 @@ describe("pult", () => {
   test("shortens a cost from a thousand dollars and a duration from a day", async () => {
     const cases: [number, number, string][] = [
       [999.994, 86_399_000, "$999.99 · 23h59"],
-      [1000, 86_400_000, "$1.0k · 1d0h"],
-      [1005.13, 647_000_000, "$1.0k · 7d11h"],
+      // Rounds up to a thousand, so it is judged as one: never $1000.00.
+      [999.995, 86_399_000, "$1k · 23h59"],
+      [1000, 86_400_000, "$1k · 1d0h"],
+      [1005.13, 647_000_000, "$1k · 7d11h"],
       [12_345, 90_000_000, "$12.3k · 1d1h"],
     ];
     for (const [total_cost_usd, total_duration_ms, want] of cases) {
       const { out, code } = await render({ model: { display_name: "Opus" }, cost: { total_cost_usd, total_duration_ms } });
+      expect(code).toBe(0);
+      expect(out).toContain(want);
+    }
+  });
+
+  // Thousands to a tenth, like the cost: 2.5k, not 3k. Each side judges itself, and a
+  // million is judged by what the k branch would print: 999_950 is 1000.0k, so it is 1M.
+  test("counts changed lines in thousands to a tenth from a thousand, each side on its own", async () => {
+    const cases: [number, number, string][] = [
+      [999, 348, "+999/-348"],
+      [156, 2_500, "+156/-2.5k"],
+      [11_108, 348, "+11.1k/-348"],
+      [999_949, 999_950, "+999.9k/-1M"],
+      [1_234_567, 0, "+1.2M/-0"],
+    ];
+    for (const [total_lines_added, total_lines_removed, want] of cases) {
+      const { out, code } = await render({ model: { display_name: "Opus" }, cost: { total_lines_added, total_lines_removed } });
       expect(code).toBe(0);
       expect(out).toContain(want);
     }
