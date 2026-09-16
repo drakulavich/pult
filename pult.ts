@@ -107,9 +107,11 @@ const YELLOW = 50;
 const RED = 80;
 const byLevel = (pct: number, s: string) => (pct >= RED ? red(s) : pct >= YELLOW ? yellow(s) : green(s));
 
+// One decimal, unless it is a zero: 1.2M and 1M, never 1.0M.
+const tenth = (n: number) => n.toFixed(1).replace(/\.0$/, "");
 // Both judge the number they would print, not the one they were given: 999_999 rounds
-// to a thousand thousands and is a million, 999.995 to a thousand dollars and is $1.0k.
-const k = (n: number) => (Math.round(n / 1000) >= 1000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+// to a thousand thousands and is a million, 999.995 to a thousand dollars and is $1k.
+const k = (n: number) => (Math.round(n / 1000) >= 1000 ? `${tenth(n / 1_000_000)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
 // Each unit up drops the one two below: hours lose seconds, days lose minutes.
 const dur = (ms: number) => {
   const m = Math.floor(ms / 60000);
@@ -118,7 +120,7 @@ const dur = (ms: number) => {
   return h ? `${h}h${String(m % 60).padStart(2, "0")}` : `${m}m`;
 };
 // Cents matter under a thousand dollars; over it the tenth does.
-const usd = (n: number) => (Number(n.toFixed(2)) >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(2)}`);
+const usd = (n: number) => (Number(n.toFixed(2)) >= 1000 ? `$${tenth(n / 1000)}k` : `$${n.toFixed(2)}`);
 const until = (epoch: number) => dur(Math.max(0, epoch * 1000 - Date.now()));
 
 // A linked worktree reports the main repository's .git, so the repository is the
@@ -186,7 +188,7 @@ if (s.cost) {
   parts.push(bits.join(dim(" · ")));
 }
 
-if (s.lines) parts.push(green(`+${s.lines.added}`) + dim("/") + red(`-${s.lines.removed}`));
+if (s.lines) parts.push(green(`+${k(s.lines.added)}`) + dim("/") + red(`-${k(s.lines.removed)}`));
 
 if (s.limits.length) {
   // A reset time is only worth its width once the window is close enough to bite.
