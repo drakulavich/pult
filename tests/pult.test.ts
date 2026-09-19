@@ -574,10 +574,13 @@ describe("pult", () => {
       writeFileSync(join(home, ".claude", "zapara", "status.json"), typeof status === "string" ? status : JSON.stringify(status) + "\n");
     }
     const env = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, PULT_TEST_LOG: log };
-    // The start is backgrounded and unwaited, so the log lands after the render returns.
+    // The start is backgrounded and unwaited, so the log lands after the render returns,
+    // and the shell creates the file a moment before it writes the line: wait for a
+    // line, not for the file, up to a second.
+    const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : []);
     const starts = async (): Promise<string[]> => {
-      for (let i = 0; i < 6 && !existsSync(log); i++) await Bun.sleep(50);
-      return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
+      for (let i = 0; i < 20 && lines().length === 0; i++) await Bun.sleep(50);
+      return lines();
     };
     return { env, starts, file: join(home, ".claude", "zapara", "status.json") };
   };
