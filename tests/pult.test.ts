@@ -690,6 +690,32 @@ describe("pult", () => {
     expect(await today.starts()).toEqual([]);
   });
 
+  // The day compared is the one the user is living in, not UTC. Every other test here
+  // renders in UTC, where the two are the same string and a UTC comparison would pass
+  // just as well; this one renders in a zone whose calendar date differs from UTC's right
+  // now, so only the local day matches the file. One of these two zones is always ahead
+  // of UTC by fourteen hours or behind it by twelve, so one of them always differs.
+  test("compares the file's day against the render's own zone, not UTC", async () => {
+    const utcDay = new Date().toISOString().slice(0, 10);
+    const dayIn = (tz: string) => new Date().toLocaleDateString("en-CA", { timeZone: tz });
+    const tz = ["Pacific/Kiritimati", "Etc/GMT+12"].find((z) => dayIn(z) !== utcDay)!;
+    expect([tz, dayIn(tz)]).not.toEqual([tz, utcDay]);
+
+    const local = zapara(statusAt(10_000, { date: dayIn(tz) }));
+    const first = await render(opus, { ...local.env, TZ: tz }, ["--zapara"]);
+    expect(first.code).toBe(0);
+    expect(first.raw).toContain("\x1b[33mload 36\x1b[0m");
+    expect(await local.starts()).toEqual([]);
+
+    // The same file dated the UTC day is about another day in this zone, so it is stale.
+    const utc = zapara(statusAt(10_000, { date: utcDay }));
+    const second = await render(opus, { ...utc.env, TZ: tz }, ["--zapara"]);
+    expect(second.raw).toContain("\x1b[2mload 36\x1b[0m");
+    expect(await utc.starts()).toEqual(["status"]);
+    // Two renders and two waits for the start log: about two seconds idle, and more than
+    // the default five under load. The number is a deadline, not a thing being measured.
+  }, 20_000);
+
   test("starts nothing when zapara is not on PATH, and still prints what it has", async () => {
     const z = zapara(statusAt(6 * 60_000));
     // An empty directory as the whole PATH: bun is run by absolute path, so nothing else is needed.
