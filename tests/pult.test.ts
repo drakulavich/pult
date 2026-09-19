@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -8,8 +8,8 @@ const wrapper = resolve(import.meta.dir, "..", "pult");
 
 type Env = Record<string, string | undefined>;
 
-async function render(payload: unknown, env?: Env): Promise<{ out: string; raw: string; err: string; code: number }> {
-  const proc = Bun.spawn([process.execPath, script], { stdin: "pipe", stdout: "pipe", stderr: "pipe", ...(env ? { env } : {}) });
+async function render(payload: unknown, env?: Env, args: string[] = []): Promise<{ out: string; raw: string; err: string; code: number }> {
+  const proc = Bun.spawn([process.execPath, script, ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe", ...(env ? { env } : {}) });
   proc.stdin.write(typeof payload === "string" ? payload : JSON.stringify(payload));
   proc.stdin.end();
   const raw = await new Response(proc.stdout).text();
@@ -552,5 +552,158 @@ describe("pult", () => {
     });
     expect(code).toBe(0);
     expect(out).toContain("bun not found");
+  });
+
+  // --zapara reads the file `zapara status` writes and keeps it fresh by starting zapara.
+  // Each test gets its own HOME (the file), TMPDIR (the single-flight marker) and a zapara
+  // on PATH that only logs its arguments, so the count of starts is a fact, not a claim.
+  const zapara = (status: unknown) => {
+    const home = temp("pult-zapara-");
+    const bin = join(home, "bin");
+    const log = join(home, "starts");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "zapara"), `#!/bin/sh\necho "$*" >> ${log}\n`, { mode: 0o755 });
+    if (status !== null) {
+      mkdirSync(join(home, ".claude", "zapara"), { recursive: true });
+      writeFileSync(join(home, ".claude", "zapara", "status.json"), typeof status === "string" ? status : JSON.stringify(status) + "\n");
+    }
+    const env = { ...process.env, HOME: home, TMPDIR: home, PATH: `${bin}:${process.env.PATH}` };
+    // The start is backgrounded and unwaited, so the log lands after the render returns,
+    // and on macOS a freshly written script is checked for a few hundred milliseconds
+    // before it first runs. The single-flight marker is written before any start, so no
+    // marker means no start and nothing to wait for.
+    const marker = join(home, `pult-zapara-${process.getuid?.() ?? 0}`);
+    const starts = async (): Promise<string[]> => {
+      for (let i = 0; i < 40 && existsSync(marker) && !existsSync(log); i++) await Bun.sleep(50);
+      return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
+    };
+    return { env, starts };
+  };
+  // A file as zapara writes it, with asOf this many milliseconds ago.
+  const statusAt = (ago: number, over: Record<string, unknown> = {}) => ({
+    schema: 1, asOf: new Date(Date.now() - ago).toISOString(), date: "2026-09-19", hour: 15, index: 36, level: "Warming", peak: 41, activeMin: 555, streakMin: 166, ...over,
+  });
+  const opus = { model: { display_name: "Opus" }, workspace: { current_dir: "/" } };
+
+  test("shows nothing from zapara and starts nothing without --zapara", async () => {
+    const z = zapara(statusAt(10 * 60_000));
+    const { out, code } = await render(opus, z.env);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus");
+    expect(await z.starts()).toEqual([]);
+  });
+
+  test("prints today's load after the rate limits and leaves a fresh file alone", async () => {
+    const z = zapara(statusAt(60_000));
+    const { out, raw, code } = await render({ ...opus, rate_limits: { five_hour: { used_percentage: 10 } } }, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ 5h 10% │ load 36 · streak 2h46 · day 9h15");
+    expect(raw).toContain("\x1b[33mload 36\x1b[0m");
+    expect(await z.starts()).toEqual([]);
+  });
+
+  // The streak and the day are the "time to rest" part: grey while they are ordinary,
+  // yellow and red once they are not, so the line does not shout in green all day.
+  test("colours the streak and the day only once they matter", async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ streakMin: 59, activeMin: 359 }, "\x1b[2mstreak 59m\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 5h59\x1b[0m"],
+      [{ streakMin: 60, activeMin: 360 }, "\x1b[33mstreak 1h00\x1b[0m\x1b[2m · \x1b[0m\x1b[33mday 6h00\x1b[0m"],
+      [{ streakMin: 120, activeMin: 480 }, "\x1b[31mstreak 2h00\x1b[0m\x1b[2m · \x1b[0m\x1b[31mday 8h00\x1b[0m"],
+    ];
+    for (const [over, want] of cases) {
+      const z = zapara(statusAt(0, over));
+      const { raw, code } = await render(opus, z.env, ["--zapara"]);
+      expect(code).toBe(0);
+      expect([JSON.stringify(over), raw]).toEqual([JSON.stringify(over), expect.stringContaining(want)]);
+    }
+  });
+
+  test("leaves the streak and the day out while they are zero", async () => {
+    const z = zapara(statusAt(0, { index: null, level: null, peak: null, activeMin: 0, streakMin: 0 }));
+    const { out, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load -");
+    const paused = zapara(statusAt(0, { streakMin: 0, activeMin: 42 }));
+    expect((await render(opus, paused.env, ["--zapara"])).out.trim()).toBe("Opus │ load 36 · day 42m");
+  });
+
+  test("colours the load by zapara's word for it, so the thresholds live in one place", async () => {
+    for (const [level, colour] of [["Calm", "\x1b[32m"], ["Warming", "\x1b[33m"], ["Heating", "\x1b[31m"], ["Fried", "\x1b[1m\x1b[31m"]]) {
+      const z = zapara(statusAt(0, { level }));
+      const { raw, code } = await render(opus, z.env, ["--zapara"]);
+      expect(code).toBe(0);
+      expect(raw).toContain(`${colour}load 36`);
+    }
+  });
+
+  test("prints a dash for an hour with no activity yet", async () => {
+    const z = zapara(statusAt(0, { index: null, level: null }));
+    const { out, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load - · streak 2h46 · day 9h15");
+  });
+
+  test("starts zapara once for a stale file and keeps printing the old value dimmed", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const first = await render(opus, z.env, ["--zapara"]);
+    expect(first.code).toBe(0);
+    // Stale, so every part is dim, the red streak and day included.
+    expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
+    // The file is still stale on the next render, and the marker says a start is pending.
+    const second = await render(opus, z.env, ["--zapara"]);
+    expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual(["status"]);
+  });
+
+  // Two Claude Code sessions share the marker, and a render can overlap the one it
+  // replaces, so the marker is claimed atomically: once when it is missing, once when
+  // it has expired, and four renders at once start zapara exactly once each time.
+  test("starts zapara once when four renders arrive at once, marker missing or expired", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const marker = join(z.env.HOME, `pult-zapara-${process.getuid?.() ?? 0}`);
+    const four = () => Promise.all([1, 2, 3, 4].map(() => render(opus, z.env, ["--zapara"])));
+    for (const r of await four()) expect(r.code).toBe(0);
+    expect(await z.starts()).toEqual(["status"]);
+    // Age the marker past the interval; every render now sees an expired one.
+    const old = new Date(Date.now() - 6 * 60_000);
+    utimesSync(marker, old, old);
+    rmSync(join(z.env.HOME, "starts"));
+    for (const r of await four()) expect(r.code).toBe(0);
+    expect(await z.starts()).toEqual(["status"]);
+  });
+
+  test("starts zapara for a missing file and prints no segment", async () => {
+    const z = zapara(null);
+    const { out, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus");
+    expect(await z.starts()).toEqual(["status"]);
+  });
+
+  // Every field is checked, not just the two printed: a file that fails is no data.
+  test("treats a file it cannot trust as no data", async () => {
+    const bad: unknown[] = [
+      statusAt(0, { schema: 2 }),
+      statusAt(0, { index: "36" }),
+      statusAt(0, { index: 136 }),
+      statusAt(0, { level: "Hot" }),
+      statusAt(0, { index: null }),
+      statusAt(0, { hour: 24 }),
+      statusAt(0, { date: "2026-02-31" }),
+      statusAt(0, { date: "2026-13-01" }),
+      statusAt(0, { streakMin: -1 }),
+      statusAt(0, { streakMin: 1441 }),
+      statusAt(0, { activeMin: 1e308 }),
+      statusAt(6 * 60_000, { activeMin: 1e308 }),
+      statusAt(0, { peak: undefined }),
+      statusAt(-2 * 60_000),
+      "not json",
+    ];
+    for (const status of bad) {
+      const z = zapara(status);
+      const { out, code } = await render(opus, z.env, ["--zapara"]);
+      expect(code).toBe(0);
+      expect([JSON.stringify(status), out.trim()]).toEqual([JSON.stringify(status), "Opus"]);
+    }
   });
 });

@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 // Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
+import { closeSync, openSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 // Already checked: an unusable field is null here, never a string where a number belongs.
 type Session = {
@@ -164,8 +167,134 @@ const branch = (cwd: string): string | null => {
 // dir. Its headers are oid, head, upstream and ab.
 const repoOf = (cwd: string): string | null => repoName(run(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"));
 
+// Today's load from zapara (https://github.com/drakulavich/zapara), read from the file
+// `zapara status` writes: one line of JSON, nine fields, documented in its spec at
+// docs/superpowers/specs/2026-09-19-zapara-status-file-design.md. Opt-in with --zapara,
+// because keeping the file fresh means starting zapara, which not every pult user has.
+type Load = { index: number | null; level: string | null; streakMin: number; activeMin: number; asOf: number };
+const LEVELS = ["Calm", "Warming", "Heating", "Fried"];
+// The file is stale, and zapara is started, once asOf is this old; and zapara is started
+// at most once per this interval however stale the file stays.
+const LOAD_STALE_MS = 5 * 60_000;
+const loadFile = (home: string) => join(home, ".claude", "zapara", "status.json");
+const int = (v: unknown, max: number): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : null);
+
+// Strict on every field, not just the ones printed: a file that fails here is no data,
+// whoever wrote it, and the reader never guesses at a field that arrived wrong.
+const decodeLoad = (raw: unknown, now: number): Load | null => {
+  const s = obj(raw);
+  const asOf = typeof s.asOf === "string" ? Date.parse(s.asOf) : NaN;
+  const index = s.index === null ? null : int(s.index, 100);
+  const level = s.level === null ? null : typeof s.level === "string" && LEVELS.includes(s.level) ? s.level : undefined;
+  // A day has 1440 minutes, and both count minutes of this day; 1e308 is an integer too.
+  const streakMin = int(s.streakMin, 1440);
+  const activeMin = int(s.activeMin, 1440);
+  const ok =
+    s.schema === 1 &&
+    Number.isFinite(asOf) &&
+    asOf <= now + 60_000 &&
+    typeof s.date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(s.date) &&
+    // A real calendar day: 2026-02-31 parses, as March 3rd, and does not round-trip.
+    new Date(`${s.date}T00:00:00Z`).toISOString().slice(0, 10) === s.date &&
+    int(s.hour, 23) !== null &&
+    (index === null) === (s.index === null) &&
+    level !== undefined &&
+    (level === null) === (index === null) &&
+    (s.peak === null || int(s.peak, 100) !== null) &&
+    activeMin !== null &&
+    streakMin !== null;
+  return ok ? { index, level, streakMin: streakMin ?? 0, activeMin: activeMin ?? 0, asOf } : null;
+};
+
+const readLoad = (home: string, now: number): Load | null => {
+  try {
+    return decodeLoad(JSON.parse(readFileSync(loadFile(home), "utf8")), now);
+  } catch {
+    return null;
+  }
+};
+
+// The one subprocess that is not git, and the only one the line does not wait for:
+// zapara scans every transcript, which is why it writes a file instead of being run each
+// render. It is started through `sh … &`, which forks it and exits at once, so this
+// process waits a few milliseconds for the shell and never for zapara, and zapara is
+// reparented to init with no handle left in this process: Bun.spawn with `detached` and
+// `unref()` was tried first, and a child started that way died when this process exited
+// before the child had finished starting. A marker in the temp dir is the single flight: a
+// zapara that is missing, broken or slow costs one start per interval, never one per
+// render. When the marker cannot be written there is no throttle, so nothing is started.
+//
+// Two renders can overlap (two Claude Code sessions share the temp dir, and a render is
+// killed rather than waited for when the next one is due), so the marker is claimed, not
+// checked and then written. A missing marker is created exclusively, and one create wins.
+// An expired marker is renamed away first, and one rename wins; the winner then creates
+// the new marker exclusively too, and if another render slipped its own in between, that
+// render is the one starting zapara, so this one does not.
+const claimStart = (marker: string, now: number): boolean => {
+  const create = (): boolean => {
+    try {
+      closeSync(openSync(marker, "wx"));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let mtime: number;
+  try {
+    mtime = statSync(marker).mtimeMs;
+  } catch {
+    return create();
+  }
+  if (now - mtime < LOAD_STALE_MS) return false;
+  const claimed = `${marker}.${process.pid}`;
+  try {
+    renameSync(marker, claimed);
+  } catch {
+    return false;
+  }
+  try {
+    unlinkSync(claimed);
+  } catch {}
+  return create();
+};
+
+const refreshLoad = (home: string, now: number): void => {
+  if (!claimStart(join(tmpdir(), `pult-zapara-${process.getuid?.() ?? 0}`), now)) return;
+  // A status line runs outside any shell profile, so PATH may lack the bun that is
+  // running this script, and a globally installed zapara lives beside that bun.
+  const zapara = Bun.which("zapara", { PATH: `${process.env.PATH ?? ""}:${dirname(process.execPath)}` });
+  const cmd = zapara ? [zapara, "status"] : [process.execPath, "x", "@drakulavich/zapara", "status"];
+  try {
+    Bun.spawnSync(["sh", "-c", '"$0" "$@" </dev/null >/dev/null 2>&1 &', ...cmd], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env: { ...process.env, HOME: home } });
+  } catch {
+    // spawnSync throws rather than exiting non-zero when sh is not on PATH.
+  }
+};
+
+// The segment answers "time to rest?": how hot this hour is, how long since a break,
+// how much of the day is spent. The level is zapara's word for the index, so the colour
+// follows it and the thresholds stay in one place, there. The streak (no pause of ten
+// minutes) and the day's active time are dim until they matter, then yellow and red, so
+// the line does not shout in green all day; each is left out while it is zero. A stale
+// value is still the last thing known, all of it dimmed.
+const STREAK_YELLOW = 60;
+const STREAK_RED = 120;
+const DAY_YELLOW = 6 * 60;
+const DAY_RED = 8 * 60;
+const loadSeg = (l: Load, fresh: boolean): string => {
+  const text = `load ${l.index ?? "-"}`;
+  const once = (min: number, at: [number, number], s: string) => (!fresh ? dim(s) : min >= at[1] ? red(s) : min >= at[0] ? yellow(s) : dim(s));
+  const bits = [
+    !fresh ? dim(text) : l.level === "Fried" ? bold(red(text)) : l.level === "Heating" ? red(text) : l.level === "Warming" ? yellow(text) : l.level === "Calm" ? green(text) : dim(text),
+    l.streakMin ? once(l.streakMin, [STREAK_YELLOW, STREAK_RED], `streak ${dur(l.streakMin * 60_000)}`) : null,
+    l.activeMin ? once(l.activeMin, [DAY_YELLOW, DAY_RED], `day ${dur(l.activeMin * 60_000)}`) : null,
+  ].filter((b) => b !== null);
+  return bits.join(dim(" · "));
+};
+
 if (process.stdin.isTTY || Bun.argv.includes("--help") || Bun.argv.includes("-h")) {
-  console.log(dim(`pult reads the Claude Code session JSON on stdin. Try: echo '{"model":{"display_name":"Opus"}}' | pult`));
+  console.log(dim(`pult reads the Claude Code session JSON on stdin. Try: echo '{"model":{"display_name":"Opus"}}' | pult. Add --zapara for today's load.`));
   process.exit(0);
 }
 
@@ -198,6 +327,15 @@ if (s.limits.length) {
   // A reset time is only worth its width once the window is close enough to bite.
   const seg = (w: Session["limits"][number]) => byLevel(w.pct, `${w.label} ${w.pct}%`) + (w.resets && w.pct >= YELLOW ? dim(` ↻${until(w.resets)}`) : "");
   parts.push(s.limits.map(seg).join(dim(" · ")));
+}
+
+if (Bun.argv.includes("--zapara")) {
+  const now = Date.now();
+  const home = process.env.HOME || homedir();
+  const load = readLoad(home, now);
+  const fresh = load !== null && now - load.asOf < LOAD_STALE_MS;
+  if (load) parts.push(loadSeg(load, fresh));
+  if (!fresh) refreshLoad(home, now);
 }
 
 const head = branch(s.cwd);
