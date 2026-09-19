@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
-import { closeSync, openSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -227,40 +227,33 @@ const readLoad = (home: string, now: number): Load | null => {
 //
 // Two renders can overlap (two Claude Code sessions share the temp dir, and a render is
 // killed rather than waited for when the next one is due), so the marker is claimed, not
-// checked and then written. A missing marker is created exclusively, and one create wins.
-// An expired marker is renamed away first, and one rename wins; the winner then creates
-// the new marker exclusively too, and if another render slipped its own in between, that
-// render is the one starting zapara, so this one does not.
-const claimStart = (marker: string, now: number): boolean => {
-  const create = (): boolean => {
-    try {
-      closeSync(openSync(marker, "wx"));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  let mtime: number;
+// checked and then written: it is named after the five-minute interval, and creating it
+// exclusively is the whole claim. One create per interval wins; nothing is aged or
+// renamed, so there is no moment at which a fresh marker can be taken for an expired
+// one. (The first scheme renamed an expired marker away and could steal the fresh one
+// that a faster render had just put in its place; CI caught it with two starts.) The
+// winner sweeps the markers of earlier intervals, so the temp dir holds one at a time.
+const claimStart = (now: number): boolean => {
+  const dir = tmpdir();
+  const prefix = `pult-zapara-${process.getuid?.() ?? 0}-`;
+  const interval = Math.floor(now / LOAD_STALE_MS);
   try {
-    mtime = statSync(marker).mtimeMs;
-  } catch {
-    return create();
-  }
-  if (now - mtime < LOAD_STALE_MS) return false;
-  const claimed = `${marker}.${process.pid}`;
-  try {
-    renameSync(marker, claimed);
+    closeSync(openSync(join(dir, `${prefix}${interval}`), "wx"));
   } catch {
     return false;
   }
   try {
-    unlinkSync(claimed);
+    for (const name of readdirSync(dir)) {
+      // Only earlier intervals: a render whose clock read a moment earlier must not
+      // sweep the marker of the interval that has just begun.
+      if (name.startsWith(prefix) && Number(name.slice(prefix.length)) < interval) unlinkSync(join(dir, name));
+    }
   } catch {}
-  return create();
+  return true;
 };
 
 const refreshLoad = (home: string, now: number): void => {
-  if (!claimStart(join(tmpdir(), `pult-zapara-${process.getuid?.() ?? 0}`), now)) return;
+  if (!claimStart(now)) return;
   // A status line runs outside any shell profile, so PATH may lack the bun that is
   // running this script, and a globally installed zapara lives beside that bun.
   const zapara = Bun.which("zapara", { PATH: `${process.env.PATH ?? ""}:${dirname(process.execPath)}` });

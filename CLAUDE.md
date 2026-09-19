@@ -27,8 +27,11 @@ around it: that is how a line earns its place, or how the code earns a fix.
   name. Wanting another git fact means arguments on a call that already runs,
   not a new one, and a test counts the calls. The one exception is `--zapara`:
   `refreshLoad()` starts `zapara status` detached and unwaited, only when the
-  status file is stale, missing or invalid, and at most once per five minutes
-  through a marker file. A test counts those starts too.
+  status file is stale, missing or invalid, and at most once per five-minute
+  interval through a marker file named after the interval, created exclusively
+  and never aged or renamed: the first scheme renamed an expired marker away and
+  could steal the fresh one a faster render had just made, and CI saw two
+  starts. A test counts those starts too.
 - **The main test pins the whole rendered line as one regex.** When it fails,
   decide whether the new line is right and update the regex deliberately. It is
   not flake, and it is the only thing watching the output as a whole.

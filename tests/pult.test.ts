@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -570,14 +570,26 @@ describe("pult", () => {
     const env = { ...process.env, HOME: home, TMPDIR: home, PATH: `${bin}:${process.env.PATH}` };
     // The start is backgrounded and unwaited, so the log lands after the render returns,
     // and on macOS a freshly written script is checked for a few hundred milliseconds
-    // before it first runs. The single-flight marker is written before any start, so no
-    // marker means no start and nothing to wait for.
-    const marker = join(home, `pult-zapara-${process.getuid?.() ?? 0}`);
+    // before it first runs. The single-flight marker (one per five-minute interval) is
+    // written before any start, so no marker means no start and nothing to wait for.
+    const prefix = `pult-zapara-${process.getuid?.() ?? 0}-`;
+    const claimed = () => readdirSync(home).some((n) => n.startsWith(prefix));
     const starts = async (): Promise<string[]> => {
-      for (let i = 0; i < 40 && existsSync(marker) && !existsSync(log); i++) await Bun.sleep(50);
+      for (let i = 0; i < 40 && claimed() && !existsSync(log); i++) await Bun.sleep(50);
       return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
     };
-    return { env, starts };
+    return { env, starts, prefix };
+  };
+  // The marker is named after the five-minute interval, so renders that straddle an
+  // interval boundary claim twice for a legitimate reason; a run that crossed one is
+  // repeated inside a single interval.
+  const interval = () => Math.floor(Date.now() / 300_000);
+  const withinOneInterval = async (run: () => Promise<void>): Promise<void> => {
+    for (;;) {
+      const at = interval();
+      await run();
+      if (interval() === at) return;
+    }
   };
   // A file as zapara writes it, with asOf this many milliseconds ago.
   const statusAt = (ago: number, over: Record<string, unknown> = {}) => ({
@@ -644,32 +656,35 @@ describe("pult", () => {
   });
 
   test("starts zapara once for a stale file and keeps printing the old value dimmed", async () => {
-    const z = zapara(statusAt(6 * 60_000));
-    const first = await render(opus, z.env, ["--zapara"]);
-    expect(first.code).toBe(0);
-    // Stale, so every part is dim, the red streak and day included.
-    expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
-    // The file is still stale on the next render, and the marker says a start is pending.
-    const second = await render(opus, z.env, ["--zapara"]);
-    expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
-    expect(await z.starts()).toEqual(["status"]);
+    await withinOneInterval(async () => {
+      const z = zapara(statusAt(6 * 60_000));
+      const first = await render(opus, z.env, ["--zapara"]);
+      expect(first.code).toBe(0);
+      // Stale, so every part is dim, the red streak and day included.
+      expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
+      // The file is still stale on the next render, and the marker says a start is pending.
+      const second = await render(opus, z.env, ["--zapara"]);
+      expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+      expect(await z.starts()).toEqual(["status"]);
+    });
   });
 
   // Two Claude Code sessions share the marker, and a render can overlap the one it
-  // replaces, so the marker is claimed atomically: once when it is missing, once when
-  // it has expired, and four renders at once start zapara exactly once each time.
-  test("starts zapara once when four renders arrive at once, marker missing or expired", async () => {
-    const z = zapara(statusAt(6 * 60_000));
-    const marker = join(z.env.HOME, `pult-zapara-${process.getuid?.() ?? 0}`);
-    const four = () => Promise.all([1, 2, 3, 4].map(() => render(opus, z.env, ["--zapara"])));
-    for (const r of await four()) expect(r.code).toBe(0);
-    expect(await z.starts()).toEqual(["status"]);
-    // Age the marker past the interval; every render now sees an expired one.
-    const old = new Date(Date.now() - 6 * 60_000);
-    utimesSync(marker, old, old);
-    rmSync(join(z.env.HOME, "starts"));
-    for (const r of await four()) expect(r.code).toBe(0);
-    expect(await z.starts()).toEqual(["status"]);
+  // replaces, so the marker is claimed by one exclusive create per interval: four
+  // renders at once start zapara exactly once, whether the temp dir is empty or holds
+  // the marker of an earlier interval, which the winner sweeps.
+  test("starts zapara once when four renders arrive at once, with or without an old marker", async () => {
+    await withinOneInterval(async () => {
+      const empty = zapara(statusAt(6 * 60_000));
+      for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, empty.env, ["--zapara"])))) expect(r.code).toBe(0);
+      expect(await empty.starts()).toEqual(["status"]);
+      const swept = zapara(statusAt(6 * 60_000));
+      const old = join(swept.env.HOME, `${swept.prefix}${interval() - 1}`);
+      writeFileSync(old, "");
+      for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, swept.env, ["--zapara"])))) expect(r.code).toBe(0);
+      expect(await swept.starts()).toEqual(["status"]);
+      expect(existsSync(old)).toBe(false);
+    });
   });
 
   test("starts zapara for a missing file and prints no segment", async () => {
