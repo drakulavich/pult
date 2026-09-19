@@ -573,7 +573,10 @@ describe("pult", () => {
       mkdirSync(join(home, ".claude", "zapara"), { recursive: true });
       writeFileSync(join(home, ".claude", "zapara", "status.json"), typeof status === "string" ? status : JSON.stringify(status) + "\n");
     }
-    const env = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, PULT_TEST_LOG: log };
+    // TZ is set because the day matters here: bun test runs this file in UTC but does not
+    // export TZ, so a render spawned without it would read the machine's zone and disagree
+    // with the fixture about which day it is. Both sides say UTC instead.
+    const env = { ...process.env, TZ: "UTC", HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, PULT_TEST_LOG: log };
     // The start is backgrounded and unwaited, so the log lands after the render returns,
     // and the shell creates the file a moment before it writes the line: wait for a
     // line, not for the file, up to a second.
@@ -584,9 +587,14 @@ describe("pult", () => {
     };
     return { env, starts, file: join(home, ".claude", "zapara", "status.json") };
   };
+  // The day a file is about, the way zapara writes it: the calendar day of the zone the
+  // render runs in, which is the UTC the env below pins, and not the machine's.
+  const day = (at: number) => new Date(at).toISOString().slice(0, 10);
+  // UTC has no DST, so a day back is always the day before.
+  const yesterday = () => day(Date.now() - 24 * 60 * 60_000);
   // A file as zapara writes it, with asOf this many milliseconds ago.
   const statusAt = (ago: number, over: Record<string, unknown> = {}) => ({
-    schema: 1, asOf: new Date(Date.now() - ago).toISOString(), date: "2026-09-19", hour: 15, index: 36, level: "Warming", peak: 41, activeMin: 555, streakMin: 166, ...over,
+    schema: 1, asOf: new Date(Date.now() - ago).toISOString(), date: day(Date.now()), hour: 15, index: 36, level: "Warming", peak: 41, activeMin: 555, streakMin: 166, ...over,
   });
   const opus = { model: { display_name: "Opus" }, workspace: { current_dir: "/" } };
 
@@ -666,6 +674,48 @@ describe("pult", () => {
     expect(await z.starts()).toEqual(["status", "status"]);
   });
 
+  // A file written at 23:59 is seconds old at 00:01 and is still yesterday's day: the
+  // day it is about is what makes it today's load, not how recently it was written.
+  test("treats a file about another day as stale, however recently it was written", async () => {
+    const z = zapara(statusAt(10_000, { date: yesterday() }));
+    const { out, raw, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m");
+    expect(await z.starts()).toEqual(["status"]);
+    // The same file about today is fresh: coloured, and nothing is started.
+    const today = zapara(statusAt(10_000));
+    const second = await render(opus, today.env, ["--zapara"]);
+    expect(second.raw).toContain("\x1b[33mload 36\x1b[0m");
+    expect(await today.starts()).toEqual([]);
+  });
+
+  // The day compared is the one the user is living in, not UTC. Every other test here
+  // renders in UTC, where the two are the same string and a UTC comparison would pass
+  // just as well; this one renders in a zone whose calendar date differs from UTC's right
+  // now, so only the local day matches the file. One of these two zones is always ahead
+  // of UTC by fourteen hours or behind it by twelve, so one of them always differs.
+  test("compares the file's day against the render's own zone, not UTC", async () => {
+    const utcDay = new Date().toISOString().slice(0, 10);
+    const dayIn = (tz: string) => new Date().toLocaleDateString("en-CA", { timeZone: tz });
+    const tz = ["Pacific/Kiritimati", "Etc/GMT+12"].find((z) => dayIn(z) !== utcDay)!;
+    expect([tz, dayIn(tz)]).not.toEqual([tz, utcDay]);
+
+    const local = zapara(statusAt(10_000, { date: dayIn(tz) }));
+    const first = await render(opus, { ...local.env, TZ: tz }, ["--zapara"]);
+    expect(first.code).toBe(0);
+    expect(first.raw).toContain("\x1b[33mload 36\x1b[0m");
+    expect(await local.starts()).toEqual([]);
+
+    // The same file dated the UTC day is about another day in this zone, so it is stale.
+    const utc = zapara(statusAt(10_000, { date: utcDay }));
+    const second = await render(opus, { ...utc.env, TZ: tz }, ["--zapara"]);
+    expect(second.raw).toContain("\x1b[2mload 36\x1b[0m");
+    expect(await utc.starts()).toEqual(["status"]);
+    // Two renders and two waits for the start log: about two seconds idle, and more than
+    // the default five under load. The number is a deadline, not a thing being measured.
+  }, 20_000);
+
   test("starts nothing when zapara is not on PATH, and still prints what it has", async () => {
     const z = zapara(statusAt(6 * 60_000));
     // An empty directory as the whole PATH: bun is run by absolute path, so nothing else is needed.
@@ -685,7 +735,7 @@ describe("pult", () => {
     const globalBin = join(z.env.HOME, ".bun", "bin");
     mkdirSync(globalBin, { recursive: true });
     symlinkSync(join(fakeBin!, "zapara"), join(globalBin, "zapara"));
-    const proc = Bun.spawn([wrapper, "--zapara"], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { HOME: z.env.HOME, PATH: "/usr/bin:/bin", PULT_SYSROOT: root, PULT_TEST_LOG: z.env.PULT_TEST_LOG } });
+    const proc = Bun.spawn([wrapper, "--zapara"], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { TZ: z.env.TZ, HOME: z.env.HOME, PATH: "/usr/bin:/bin", PULT_SYSROOT: root, PULT_TEST_LOG: z.env.PULT_TEST_LOG } });
     proc.stdin.write(JSON.stringify(opus));
     proc.stdin.end();
     const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
@@ -702,6 +752,16 @@ describe("pult", () => {
     expect(await z.starts()).toEqual(["status"]);
   });
 
+  // A day is 1440 minutes until the clocks go back, and then it is 1500. Rejecting the
+  // whole file over those extra sixty minutes would blank the segment for that whole day.
+  test("accepts the 25 hours of a DST fall-back day", async () => {
+    const z = zapara(statusAt(0, { activeMin: 1500, streakMin: 1500 }));
+    const { out, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 1d1h · day 1d1h");
+    expect(await z.starts()).toEqual([]);
+  });
+
   // Every field is checked, not just the two printed: a file that fails is no data.
   test("treats a file it cannot trust as no data", async () => {
     const bad: unknown[] = [
@@ -714,7 +774,8 @@ describe("pult", () => {
       statusAt(0, { date: "2026-02-31" }),
       statusAt(0, { date: "2026-13-01" }),
       statusAt(0, { streakMin: -1 }),
-      statusAt(0, { streakMin: 1441 }),
+      statusAt(0, { streakMin: 1501 }),
+      statusAt(0, { activeMin: 1501 }),
       statusAt(0, { activeMin: 1e308 }),
       statusAt(6 * 60_000, { activeMin: 1e308 }),
       statusAt(0, { peak: undefined }),
@@ -726,6 +787,8 @@ describe("pult", () => {
       const { out, code } = await render(opus, z.env, ["--zapara"]);
       expect(code).toBe(0);
       expect([JSON.stringify(status), out.trim()]).toEqual([JSON.stringify(status), "Opus"]);
+      // No data is as stale as data can be, so each of these also asks zapara for a file.
+      expect([JSON.stringify(status), await z.starts()]).toEqual([JSON.stringify(status), ["status"]]);
     }
   });
 });

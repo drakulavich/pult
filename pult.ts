@@ -171,10 +171,18 @@ const repoOf = (cwd: string): string | null => repoName(run(cwd, "rev-parse", "-
 // `zapara status` writes: one line of JSON, nine fields, documented in its spec at
 // docs/superpowers/specs/2026-09-19-zapara-status-file-design.md. Opt-in with --zapara,
 // because keeping the file fresh means starting zapara, which not every pult user has.
-type Load = { index: number | null; level: string | null; streakMin: number; activeMin: number; asOf: number };
+type Load = { index: number | null; level: string | null; streakMin: number; activeMin: number; asOf: number; date: string };
 const LEVELS = ["Calm", "Warming", "Heating", "Fried"];
 // The file is stale, and zapara is started, once asOf is this old.
 const LOAD_STALE_MS = 5 * 60_000;
+// The local calendar day, the way zapara writes the file's `date`. A file written at
+// 23:59 is seconds old at 00:01 and is still yesterday's load, so the day it is about
+// decides whether it is today's as much as its age does. Local, not UTC: the day the
+// user is living in is the one the numbers count.
+const localDate = (now: number): string => {
+  const d = new Date(now);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const loadFile = (home: string) => join(home, ".claude", "zapara", "status.json");
 const int = (v: unknown, max: number): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : null);
 
@@ -185,17 +193,18 @@ const decodeLoad = (raw: unknown, now: number): Load | null => {
   const asOf = typeof s.asOf === "string" ? Date.parse(s.asOf) : NaN;
   const index = s.index === null ? null : int(s.index, 100);
   const level = s.level === null ? null : typeof s.level === "string" && LEVELS.includes(s.level) ? s.level : undefined;
-  // A day has 1440 minutes, and both count minutes of this day; 1e308 is an integer too.
-  const streakMin = int(s.streakMin, 1440);
-  const activeMin = int(s.activeMin, 1440);
+  // A real calendar day: 2026-02-31 parses, as March 3rd, and does not round-trip.
+  const date =
+    typeof s.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.date) && new Date(`${s.date}T00:00:00Z`).toISOString().slice(0, 10) === s.date ? s.date : null;
+  // Both count minutes of this day, and a DST fall-back day has 25 hours, 1500 minutes;
+  // 1e308 is an integer too.
+  const streakMin = int(s.streakMin, 1500);
+  const activeMin = int(s.activeMin, 1500);
   const ok =
     s.schema === 1 &&
     Number.isFinite(asOf) &&
     asOf <= now + 60_000 &&
-    typeof s.date === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(s.date) &&
-    // A real calendar day: 2026-02-31 parses, as March 3rd, and does not round-trip.
-    new Date(`${s.date}T00:00:00Z`).toISOString().slice(0, 10) === s.date &&
+    date !== null &&
     int(s.hour, 23) !== null &&
     (index === null) === (s.index === null) &&
     level !== undefined &&
@@ -203,7 +212,7 @@ const decodeLoad = (raw: unknown, now: number): Load | null => {
     (s.peak === null || int(s.peak, 100) !== null) &&
     activeMin !== null &&
     streakMin !== null;
-  return ok ? { index, level, streakMin: streakMin ?? 0, activeMin: activeMin ?? 0, asOf } : null;
+  return ok ? { index, level, streakMin: streakMin ?? 0, activeMin: activeMin ?? 0, asOf, date: date ?? "" } : null;
 };
 
 const readLoad = (home: string, now: number): Load | null => {
@@ -298,7 +307,7 @@ if (Bun.argv.includes("--zapara")) {
   const now = Date.now();
   const home = process.env.HOME || homedir();
   const load = readLoad(home, now);
-  const fresh = load !== null && now - load.asOf < LOAD_STALE_MS;
+  const fresh = load !== null && now - load.asOf < LOAD_STALE_MS && load.date === localDate(now);
   if (load) parts.push(loadSeg(load, fresh));
   if (!fresh) refreshLoad(home);
 }
