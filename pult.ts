@@ -171,7 +171,7 @@ const repoOf = (cwd: string): string | null => repoName(run(cwd, "rev-parse", "-
 // `zapara status` writes: one line of JSON, nine fields, documented in its spec at
 // docs/superpowers/specs/2026-09-19-zapara-status-file-design.md. Opt-in with --zapara,
 // because keeping the file fresh means starting zapara, which not every pult user has.
-type Load = { index: number | null; level: string | null; asOf: number };
+type Load = { index: number | null; level: string | null; streakMin: number; activeMin: number; asOf: number };
 const LEVELS = ["Calm", "Warming", "Heating", "Fried"];
 // The file is stale, and zapara is started, once asOf is this old; and zapara is started
 // at most once per this interval however stale the file stays.
@@ -186,6 +186,8 @@ const decodeLoad = (raw: unknown, now: number): Load | null => {
   const asOf = typeof s.asOf === "string" ? Date.parse(s.asOf) : NaN;
   const index = s.index === null ? null : int(s.index, 100);
   const level = s.level === null ? null : typeof s.level === "string" && LEVELS.includes(s.level) ? s.level : undefined;
+  const streakMin = int(s.streakMin, Infinity);
+  const activeMin = int(s.activeMin, Infinity);
   const ok =
     s.schema === 1 &&
     Number.isFinite(asOf) &&
@@ -199,9 +201,9 @@ const decodeLoad = (raw: unknown, now: number): Load | null => {
     level !== undefined &&
     (level === null) === (index === null) &&
     (s.peak === null || int(s.peak, 100) !== null) &&
-    int(s.activeMin, Infinity) !== null &&
-    int(s.streakMin, Infinity) !== null;
-  return ok ? { index, level, asOf } : null;
+    activeMin !== null &&
+    streakMin !== null;
+  return ok ? { index, level, streakMin: streakMin ?? 0, activeMin: activeMin ?? 0, asOf } : null;
 };
 
 const readLoad = (home: string, now: number): Load | null => {
@@ -269,12 +271,25 @@ const refreshLoad = (home: string, now: number): void => {
   }
 };
 
-// The level is zapara's word for the number, so the colour follows it and the
-// thresholds stay in one place, there. A stale value is still the last thing known.
+// The segment answers "time to rest?": how hot this hour is, how long since a break,
+// how much of the day is spent. The level is zapara's word for the index, so the colour
+// follows it and the thresholds stay in one place, there. The streak (no pause of ten
+// minutes) and the day's active time are dim until they matter, then yellow and red, so
+// the line does not shout in green all day; each is left out while it is zero. A stale
+// value is still the last thing known, all of it dimmed.
+const STREAK_YELLOW = 60;
+const STREAK_RED = 120;
+const DAY_YELLOW = 6 * 60;
+const DAY_RED = 8 * 60;
 const loadSeg = (l: Load, fresh: boolean): string => {
   const text = `load ${l.index ?? "-"}`;
-  if (!fresh) return dim(text);
-  return l.level === "Fried" ? bold(red(text)) : l.level === "Heating" ? red(text) : l.level === "Warming" ? yellow(text) : l.level === "Calm" ? green(text) : dim(text);
+  const once = (min: number, at: [number, number], s: string) => (!fresh ? dim(s) : min >= at[1] ? red(s) : min >= at[0] ? yellow(s) : dim(s));
+  const bits = [
+    !fresh ? dim(text) : l.level === "Fried" ? bold(red(text)) : l.level === "Heating" ? red(text) : l.level === "Warming" ? yellow(text) : l.level === "Calm" ? green(text) : dim(text),
+    l.streakMin ? once(l.streakMin, [STREAK_YELLOW, STREAK_RED], `streak ${dur(l.streakMin * 60_000)}`) : null,
+    l.activeMin ? once(l.activeMin, [DAY_YELLOW, DAY_RED], `day ${dur(l.activeMin * 60_000)}`) : null,
+  ].filter((b) => b !== null);
+  return bits.join(dim(" · "));
 };
 
 if (process.stdin.isTTY || Bun.argv.includes("--help") || Bun.argv.includes("-h")) {

@@ -597,9 +597,34 @@ describe("pult", () => {
     const z = zapara(statusAt(60_000));
     const { out, raw, code } = await render({ ...opus, rate_limits: { five_hour: { used_percentage: 10 } } }, z.env, ["--zapara"]);
     expect(code).toBe(0);
-    expect(out.trim()).toBe("Opus │ 5h 10% │ load 36");
-    expect(raw).toContain("\x1b[33mload 36");
+    expect(out.trim()).toBe("Opus │ 5h 10% │ load 36 · streak 2h46 · day 9h15");
+    expect(raw).toContain("\x1b[33mload 36\x1b[0m");
     expect(await z.starts()).toEqual([]);
+  });
+
+  // The streak and the day are the "time to rest" part: grey while they are ordinary,
+  // yellow and red once they are not, so the line does not shout in green all day.
+  test("colours the streak and the day only once they matter", async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ streakMin: 59, activeMin: 359 }, "\x1b[2mstreak 59m\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 5h59\x1b[0m"],
+      [{ streakMin: 60, activeMin: 360 }, "\x1b[33mstreak 1h00\x1b[0m\x1b[2m · \x1b[0m\x1b[33mday 6h00\x1b[0m"],
+      [{ streakMin: 120, activeMin: 480 }, "\x1b[31mstreak 2h00\x1b[0m\x1b[2m · \x1b[0m\x1b[31mday 8h00\x1b[0m"],
+    ];
+    for (const [over, want] of cases) {
+      const z = zapara(statusAt(0, over));
+      const { raw, code } = await render(opus, z.env, ["--zapara"]);
+      expect(code).toBe(0);
+      expect([JSON.stringify(over), raw]).toEqual([JSON.stringify(over), expect.stringContaining(want)]);
+    }
+  });
+
+  test("leaves the streak and the day out while they are zero", async () => {
+    const z = zapara(statusAt(0, { index: null, level: null, peak: null, activeMin: 0, streakMin: 0 }));
+    const { out, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load -");
+    const paused = zapara(statusAt(0, { streakMin: 0, activeMin: 42 }));
+    expect((await render(opus, paused.env, ["--zapara"])).out.trim()).toBe("Opus │ load 36 · day 42m");
   });
 
   test("colours the load by zapara's word for it, so the thresholds live in one place", async () => {
@@ -615,17 +640,18 @@ describe("pult", () => {
     const z = zapara(statusAt(0, { index: null, level: null }));
     const { out, code } = await render(opus, z.env, ["--zapara"]);
     expect(code).toBe(0);
-    expect(out.trim()).toBe("Opus │ load -");
+    expect(out.trim()).toBe("Opus │ load - · streak 2h46 · day 9h15");
   });
 
   test("starts zapara once for a stale file and keeps printing the old value dimmed", async () => {
     const z = zapara(statusAt(6 * 60_000));
     const first = await render(opus, z.env, ["--zapara"]);
     expect(first.code).toBe(0);
-    expect(first.raw).toContain("\x1b[2mload 36");
+    // Stale, so every part is dim, the red streak and day included.
+    expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
     // The file is still stale on the next render, and the marker says a start is pending.
     const second = await render(opus, z.env, ["--zapara"]);
-    expect(second.out.trim()).toBe("Opus │ load 36");
+    expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
     expect(await z.starts()).toEqual(["status"]);
   });
 
