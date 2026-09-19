@@ -185,9 +185,10 @@ const decodeLoad = (raw: unknown, now: number): Load | null => {
   const asOf = typeof s.asOf === "string" ? Date.parse(s.asOf) : NaN;
   const index = s.index === null ? null : int(s.index, 100);
   const level = s.level === null ? null : typeof s.level === "string" && LEVELS.includes(s.level) ? s.level : undefined;
-  // A day has 1440 minutes, and both count minutes of this day; 1e308 is an integer too.
-  const streakMin = int(s.streakMin, 1440);
-  const activeMin = int(s.activeMin, 1440);
+  // Both count minutes of this day, and a DST fall-back day has 25 hours, 1500 minutes;
+  // 1e308 is an integer too.
+  const streakMin = int(s.streakMin, 1500);
+  const activeMin = int(s.activeMin, 1500);
   const ok =
     s.schema === 1 &&
     Number.isFinite(asOf) &&

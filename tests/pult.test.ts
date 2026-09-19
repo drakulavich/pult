@@ -702,6 +702,16 @@ describe("pult", () => {
     expect(await z.starts()).toEqual(["status"]);
   });
 
+  // A day is 1440 minutes until the clocks go back, and then it is 1500. Rejecting the
+  // whole file over those extra sixty minutes would blank the segment for that whole day.
+  test("accepts the 25 hours of a DST fall-back day", async () => {
+    const z = zapara(statusAt(0, { activeMin: 1500, streakMin: 1500 }));
+    const { out, code } = await render(opus, z.env, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 1d1h · day 1d1h");
+    expect(await z.starts()).toEqual([]);
+  });
+
   // Every field is checked, not just the two printed: a file that fails is no data.
   test("treats a file it cannot trust as no data", async () => {
     const bad: unknown[] = [
@@ -714,7 +724,8 @@ describe("pult", () => {
       statusAt(0, { date: "2026-02-31" }),
       statusAt(0, { date: "2026-13-01" }),
       statusAt(0, { streakMin: -1 }),
-      statusAt(0, { streakMin: 1441 }),
+      statusAt(0, { streakMin: 1501 }),
+      statusAt(0, { activeMin: 1501 }),
       statusAt(0, { activeMin: 1e308 }),
       statusAt(6 * 60_000, { activeMin: 1e308 }),
       statusAt(0, { peak: undefined }),
@@ -726,6 +737,8 @@ describe("pult", () => {
       const { out, code } = await render(opus, z.env, ["--zapara"]);
       expect(code).toBe(0);
       expect([JSON.stringify(status), out.trim()]).toEqual([JSON.stringify(status), "Opus"]);
+      // No data is as stale as data can be, so each of these also asks zapara for a file.
+      expect([JSON.stringify(status), await z.starts()]).toEqual([JSON.stringify(status), ["status"]]);
     }
   });
 });
