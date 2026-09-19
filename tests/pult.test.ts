@@ -663,12 +663,28 @@ describe("pult", () => {
     expect(await z.starts()).toEqual(["status", "status"]);
   });
 
-  test("starts nothing when zapara is not installed, and still prints what it has", async () => {
+  test("starts nothing when zapara is not on PATH, and still prints what it has", async () => {
     const z = zapara(statusAt(6 * 60_000));
     const { out, code } = await render(opus, { ...z.env, PATH: "/usr/bin:/bin" }, ["--zapara"]);
     expect(code).toBe(0);
     expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
     expect(await z.starts()).toEqual([]);
+  });
+
+  // The wrapper is where PATH is made: a global install puts zapara beside bun.
+  test("the wrapper finds a zapara beside the bun it found", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const bin = join(z.env.HOME, ".bun", "bin");
+    mkdirSync(bin, { recursive: true });
+    symlinkSync(process.execPath, join(bin, "bun"));
+    symlinkSync(join(fakeBin!, "zapara"), join(bin, "zapara"));
+    const proc = Bun.spawn([wrapper, "--zapara"], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { HOME: z.env.HOME, PATH: "/usr/bin:/bin", PULT_TEST_LOG: z.env.PULT_TEST_LOG } });
+    proc.stdin.write(JSON.stringify(opus));
+    proc.stdin.end();
+    const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
+    expect(await proc.exited).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual(["status"]);
   });
 
   test("starts zapara for a missing file and prints no segment", async () => {

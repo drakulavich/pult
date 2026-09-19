@@ -2,7 +2,7 @@
 // Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 // Already checked: an unusable field is null here, never a string where a number belongs.
 type Session = {
@@ -225,11 +225,10 @@ const readLoad = (home: string, now: number): Load | null => {
 // starts, and a second start from an overlapping render is harmless because zapara
 // writes its file atomically. A zapara that is broken costs one shell fork per render.
 const refreshLoad = (home: string): void => {
-  // A status line runs outside any shell profile, so PATH may lack the bun that is
-  // running this script, and a globally installed zapara lives beside that bun. No
-  // zapara means no start: --zapara says you have it, and nothing is fetched behind
-  // your back.
-  const zapara = Bun.which("zapara", { PATH: `${process.env.PATH ?? ""}:${dirname(process.execPath)}` });
+  // On PATH only: the wrapper puts bun's own directory there, which is where a global
+  // install lives, and a status line runs outside any shell profile. No zapara means no
+  // start: --zapara says you have it, and nothing is fetched behind your back.
+  const zapara = Bun.which("zapara");
   if (!zapara) return;
   try {
     Bun.spawnSync(["sh", "-c", '"$0" "$@" </dev/null >/dev/null 2>&1 &', zapara, "status"], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env: { ...process.env, HOME: home } });
