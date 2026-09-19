@@ -49,7 +49,7 @@ Then add this to `~/.claude/settings.json`:
 }
 ```
 
-Claude Code reads that at startup, so the line appears in your next session. It runs the command through a shell, which is why the `~` expands; if you cloned somewhere else, the command is just that path instead.
+Claude Code reads that at startup, so the line appears in your next session. It runs the command through a shell, which is why the `~` expands; if you cloned somewhere else, the command is just that path instead. Add ` --zapara` to the command for [today's load](#todays-load-from-zapara), if you use zapara.
 
 Windows routes the command through Git Bash and should run the wrapper unchanged. Nobody has tried it.
 
@@ -118,6 +118,7 @@ Left to right, with the payload field each section comes from. The fields are do
 | `$4.21 · 1h30` | `cost.total_cost_usd`, `total_duration_ms` | A thousand dollars becomes `$1k`, a day becomes `1d0h`; the minutes go with it |
 | `+156/-23` | `cost.total_lines_added`, `total_lines_removed` | Thousands to a tenth from a thousand, `+11.1k/-348`; hidden when both are zero |
 | `5h 24% · 7d 81% ↻3d11h` | `rate_limits.five_hour`, `seven_day` | The `↻` reset time appears once a window has gone yellow, so a quiet session shows percentages alone |
+| `load 36` | `~/.claude/zapara/status.json`, with `--zapara` | This hour's cognitive load index from [zapara](https://github.com/drakulavich/zapara), coloured by its level; `load -` in an hour with no activity yet, dim once the file is older than five minutes. See [Today's load from zapara](#todays-load-from-zapara) |
 | `pult:main*` | `workspace.repo.name`, then git | The payload's repo name, an empty one counting as no name, else the repository `git` reports, else the last segment of the working directory. The branch comes from `git` in that directory, so it is empty outside a repo |
 | `(wt review)` | `worktree.name`, `workspace.git_worktree` | Collapses to `(wt)` when the worktree is named after the branch already shown. Both fields are names, so either prints whole; an empty one counts as no name |
 | `PR #1150 approved` | `pr.number`, `pr.review_state` | The state is printed only when it asks for something: `approved` green, `changes_requested` red, `draft` dim. A `pending` review, which is most of them, leaves the number alone |
@@ -126,6 +127,18 @@ Left to right, with the payload field each section comes from. The fields are do
 Every percentage is whole and capped at 100, so the number printed is the one the colour follows, and the one the `↻` reset time appears alongside.
 
 Absent data drops its section rather than rendering a zero or a placeholder, so the line stays short in a fresh session and grows as the session does.
+
+## Today's load from zapara
+
+[zapara](https://github.com/drakulavich/zapara) reads your Claude Code transcripts and scores each hour's cognitive load from 0 to 100. That scan takes longer than a status line should, so zapara does not run on every render: `zapara status` writes the current hour to `~/.claude/zapara/status.json`, one line of JSON, and pult reads that file. The segment is off unless the command in `settings.json` ends with `--zapara`, because keeping the file fresh means starting zapara, and not everyone has it:
+
+```json
+"command": "~/.claude/pult/pult --zapara"
+```
+
+With the flag, every render reads the file and prints `load 36` in the colour of zapara's level for that number: calm green, warming yellow, heating red, fried bold red. An hour with no activity yet prints `load -`. When the file's `asOf` is older than five minutes, or the file is missing or fails validation, pult starts `zapara status` in the background (the `zapara` on your `PATH` or beside your `bun`, else `bun x @drakulavich/zapara status`), does not wait for it, and prints the last value it has, dimmed, or nothing. The next render, thirty seconds later, reads the fresh file. A zapara that is missing or broken costs one background start every five minutes and an empty segment, never an error in the line: a marker file in your temp directory is what keeps it to one start per interval.
+
+The file is validated field by field before anything is printed, and a file that does not pass is treated as no data. The file format and this refresh contract are documented in zapara's spec, `docs/superpowers/specs/2026-09-19-zapara-status-file-design.md`.
 
 ## When something is wrong
 
