@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -555,41 +555,31 @@ describe("pult", () => {
   });
 
   // --zapara reads the file `zapara status` writes and keeps it fresh by starting zapara.
-  // Each test gets its own HOME (the file), TMPDIR (the single-flight marker) and a zapara
-  // on PATH that only logs its arguments, so the count of starts is a fact, not a claim.
+  // Each test gets its own HOME (the file) and a log; the zapara on PATH is one fake for
+  // the whole run that only logs its arguments, so the count of starts is a fact, not a
+  // claim. One fake, because macOS checks a freshly written script for a few hundred
+  // milliseconds before it first runs; it is run once here, into /dev/null.
+  let fakeBin: string | null = null;
   const zapara = (status: unknown) => {
+    if (fakeBin === null) {
+      fakeBin = join(temp("pult-fake-zapara-"), "bin");
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, "zapara"), '#!/bin/sh\necho "$*" >> "$PULT_TEST_LOG"\n', { mode: 0o755 });
+      Bun.spawnSync([join(fakeBin, "zapara"), "warm"], { env: { ...process.env, PULT_TEST_LOG: "/dev/null" }, stdout: "ignore", stderr: "ignore" });
+    }
     const home = temp("pult-zapara-");
-    const bin = join(home, "bin");
     const log = join(home, "starts");
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, "zapara"), `#!/bin/sh\necho "$*" >> ${log}\n`, { mode: 0o755 });
     if (status !== null) {
       mkdirSync(join(home, ".claude", "zapara"), { recursive: true });
       writeFileSync(join(home, ".claude", "zapara", "status.json"), typeof status === "string" ? status : JSON.stringify(status) + "\n");
     }
-    const env = { ...process.env, HOME: home, TMPDIR: home, PATH: `${bin}:${process.env.PATH}` };
-    // The start is backgrounded and unwaited, so the log lands after the render returns,
-    // and on macOS a freshly written script is checked for a few hundred milliseconds
-    // before it first runs. The single-flight marker (one per five-minute interval) is
-    // written before any start, so no marker means no start and nothing to wait for.
-    const markers = join(home, `pult-zapara-${process.getuid?.() ?? 0}`);
-    const claimed = () => existsSync(markers) && readdirSync(markers).length > 0;
+    const env = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, PULT_TEST_LOG: log };
+    // The start is backgrounded and unwaited, so the log lands after the render returns.
     const starts = async (): Promise<string[]> => {
-      for (let i = 0; i < 40 && claimed() && !existsSync(log); i++) await Bun.sleep(50);
+      for (let i = 0; i < 6 && !existsSync(log); i++) await Bun.sleep(50);
       return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
     };
-    return { env, starts, markers };
-  };
-  // The marker is named after the five-minute interval, so renders that straddle an
-  // interval boundary claim twice for a legitimate reason; a run that crossed one is
-  // repeated inside a single interval.
-  const interval = () => Math.floor(Date.now() / 300_000);
-  const withinOneInterval = async (run: () => Promise<void>): Promise<void> => {
-    for (;;) {
-      const at = interval();
-      await run();
-      if (interval() === at) return;
-    }
+    return { env, starts, file: join(home, ".claude", "zapara", "status.json") };
   };
   // A file as zapara writes it, with asOf this many milliseconds ago.
   const statusAt = (ago: number, over: Record<string, unknown> = {}) => ({
@@ -655,37 +645,30 @@ describe("pult", () => {
     expect(out.trim()).toBe("Opus │ load - · streak 2h46 · day 9h15");
   });
 
-  test("starts zapara once for a stale file and keeps printing the old value dimmed", async () => {
-    await withinOneInterval(async () => {
-      const z = zapara(statusAt(6 * 60_000));
-      const first = await render(opus, z.env, ["--zapara"]);
-      expect(first.code).toBe(0);
-      // Stale, so every part is dim, the red streak and day included.
-      expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
-      // The file is still stale on the next render, and the marker says a start is pending.
-      const second = await render(opus, z.env, ["--zapara"]);
-      expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
-      expect(await z.starts()).toEqual(["status"]);
-    });
+  test("starts zapara on every render while the file is stale, and prints the old value dimmed", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const first = await render(opus, z.env, ["--zapara"]);
+    expect(first.code).toBe(0);
+    // Stale, so every part is dim, the red streak and day included.
+    expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
+    expect(await z.starts()).toEqual(["status"]);
+    // Still stale on the next render: another start, no throttle to get wrong.
+    const second = await render(opus, z.env, ["--zapara"]);
+    expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual(["status", "status"]);
+    // The fresh file zapara writes is what ends the starts.
+    writeFileSync(z.file, JSON.stringify(statusAt(0)) + "\n");
+    const third = await render(opus, z.env, ["--zapara"]);
+    expect(third.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual(["status", "status"]);
   });
 
-  // Two Claude Code sessions share the marker, and a render can overlap the one it
-  // replaces, so the marker is claimed by one exclusive create per interval: four
-  // renders at once start zapara exactly once, whether the temp dir is empty or holds
-  // the marker of an earlier interval, which the winner sweeps.
-  test("starts zapara once when four renders arrive at once, with or without an old marker", async () => {
-    await withinOneInterval(async () => {
-      const empty = zapara(statusAt(6 * 60_000));
-      for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, empty.env, ["--zapara"])))) expect(r.code).toBe(0);
-      expect(await empty.starts()).toEqual(["status"]);
-      const swept = zapara(statusAt(6 * 60_000));
-      mkdirSync(swept.markers, { recursive: true });
-      const old = join(swept.markers, String(interval() - 1));
-      writeFileSync(old, "");
-      for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, swept.env, ["--zapara"])))) expect(r.code).toBe(0);
-      expect(await swept.starts()).toEqual(["status"]);
-      expect(existsSync(old)).toBe(false);
-    });
+  test("starts nothing when zapara is not installed, and still prints what it has", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const { out, code } = await render(opus, { ...z.env, PATH: "/usr/bin:/bin" }, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual([]);
   });
 
   test("starts zapara for a missing file and prints no segment", async () => {

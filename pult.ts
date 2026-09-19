@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 // Already checked: an unusable field is null here, never a string where a number belongs.
@@ -173,8 +173,7 @@ const repoOf = (cwd: string): string | null => repoName(run(cwd, "rev-parse", "-
 // because keeping the file fresh means starting zapara, which not every pult user has.
 type Load = { index: number | null; level: string | null; streakMin: number; activeMin: number; asOf: number };
 const LEVELS = ["Calm", "Warming", "Heating", "Fried"];
-// The file is stale, and zapara is started, once asOf is this old; and zapara is started
-// at most once per this interval however stale the file stays.
+// The file is stale, and zapara is started, once asOf is this old.
 const LOAD_STALE_MS = 5 * 60_000;
 const loadFile = (home: string) => join(home, ".claude", "zapara", "status.json");
 const int = (v: unknown, max: number): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : null);
@@ -219,49 +218,21 @@ const readLoad = (home: string, now: number): Load | null => {
 // zapara scans every transcript, which is why it writes a file instead of being run each
 // render. It is started through `sh … &`, which forks it and exits at once, so this
 // process waits a few milliseconds for the shell and never for zapara, and zapara is
-// reparented to init with no handle left in this process: Bun.spawn with `detached` and
-// `unref()` was tried first, and a child started that way died when this process exited
-// before the child had finished starting. A marker in the temp dir is the single flight: a
-// zapara that is missing, broken or slow costs one start per interval, never one per
-// render. When the marker cannot be written there is no throttle, so nothing is started.
-//
-// Two renders can overlap (two Claude Code sessions share the temp dir, and a render is
-// killed rather than waited for when the next one is due), so the marker is claimed, not
-// checked and then written: it is named after the five-minute interval, and creating it
-// exclusively is the whole claim. One create per interval wins; nothing is aged or
-// renamed, so there is no moment at which a fresh marker can be taken for an expired
-// one. (The first scheme renamed an expired marker away and could steal the fresh one
-// that a faster render had just put in its place; CI caught it with two starts.) The
-// markers live in a directory of their own, so the winner's sweep of earlier intervals
-// can touch nothing else, and the directory holds one marker at a time.
-const claimStart = (): boolean => {
-  const dir = join(tmpdir(), `pult-zapara-${process.getuid?.() ?? 0}`);
-  // The clock is read at the claim, not when the render began: a render that stalled
-  // across an interval boundary would otherwise claim an interval that is already over.
-  const interval = Math.floor(Date.now() / LOAD_STALE_MS);
-  try {
-    mkdirSync(dir, { recursive: true });
-    closeSync(openSync(join(dir, String(interval)), "wx"));
-  } catch {
-    return false;
-  }
-  try {
-    for (const name of readdirSync(dir)) {
-      // Only earlier intervals, never the one that has just begun.
-      if (Number(name) < interval) unlinkSync(join(dir, name));
-    }
-  } catch {}
-  return true;
-};
-
-const refreshLoad = (home: string, now: number): void => {
-  if (!claimStart()) return;
+// reparented to init with no handle left here (Bun.spawn with `detached` and `unref()`
+// was tried first, and a child started that way died when this process exited before
+// the child had finished starting). There is no throttle and no shared state: every
+// render that finds the file stale starts one, the fresh file that lands stops the
+// starts, and a second start from an overlapping render is harmless because zapara
+// writes its file atomically. A zapara that is broken costs one shell fork per render.
+const refreshLoad = (home: string): void => {
   // A status line runs outside any shell profile, so PATH may lack the bun that is
-  // running this script, and a globally installed zapara lives beside that bun.
+  // running this script, and a globally installed zapara lives beside that bun. No
+  // zapara means no start: --zapara says you have it, and nothing is fetched behind
+  // your back.
   const zapara = Bun.which("zapara", { PATH: `${process.env.PATH ?? ""}:${dirname(process.execPath)}` });
-  const cmd = zapara ? [zapara, "status"] : [process.execPath, "x", "@drakulavich/zapara", "status"];
+  if (!zapara) return;
   try {
-    Bun.spawnSync(["sh", "-c", '"$0" "$@" </dev/null >/dev/null 2>&1 &', ...cmd], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env: { ...process.env, HOME: home } });
+    Bun.spawnSync(["sh", "-c", '"$0" "$@" </dev/null >/dev/null 2>&1 &', zapara, "status"], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env: { ...process.env, HOME: home } });
   } catch {
     // spawnSync throws rather than exiting non-zero when sh is not on PATH.
   }
@@ -330,7 +301,7 @@ if (Bun.argv.includes("--zapara")) {
   const load = readLoad(home, now);
   const fresh = load !== null && now - load.asOf < LOAD_STALE_MS;
   if (load) parts.push(loadSeg(load, fresh));
-  if (!fresh) refreshLoad(home, now);
+  if (!fresh) refreshLoad(home);
 }
 
 const head = branch(s.cwd);
