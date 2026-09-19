@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -555,29 +555,34 @@ describe("pult", () => {
   });
 
   // --zapara reads the file `zapara status` writes and keeps it fresh by starting zapara.
-  // Each test gets its own HOME (the file), TMPDIR (the single-flight marker) and a zapara
-  // on PATH that only logs its arguments, so the count of starts is a fact, not a claim.
+  // Each test gets its own HOME (the file) and a log; the zapara on PATH is one fake for
+  // the whole run that only logs its arguments, so the count of starts is a fact, not a
+  // claim. One fake, because macOS checks a freshly written script for a few hundred
+  // milliseconds before it first runs; it is run once here, into /dev/null.
+  let fakeBin: string | null = null;
   const zapara = (status: unknown) => {
+    if (fakeBin === null) {
+      fakeBin = join(temp("pult-fake-zapara-"), "bin");
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, "zapara"), '#!/bin/sh\necho "$*" >> "$PULT_TEST_LOG"\n', { mode: 0o755 });
+      Bun.spawnSync([join(fakeBin, "zapara"), "warm"], { env: { ...process.env, PULT_TEST_LOG: "/dev/null" }, stdout: "ignore", stderr: "ignore" });
+    }
     const home = temp("pult-zapara-");
-    const bin = join(home, "bin");
     const log = join(home, "starts");
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, "zapara"), `#!/bin/sh\necho "$*" >> ${log}\n`, { mode: 0o755 });
     if (status !== null) {
       mkdirSync(join(home, ".claude", "zapara"), { recursive: true });
       writeFileSync(join(home, ".claude", "zapara", "status.json"), typeof status === "string" ? status : JSON.stringify(status) + "\n");
     }
-    const env = { ...process.env, HOME: home, TMPDIR: home, PATH: `${bin}:${process.env.PATH}` };
+    const env = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, PULT_TEST_LOG: log };
     // The start is backgrounded and unwaited, so the log lands after the render returns,
-    // and on macOS a freshly written script is checked for a few hundred milliseconds
-    // before it first runs. The single-flight marker is written before any start, so no
-    // marker means no start and nothing to wait for.
-    const marker = join(home, `pult-zapara-${process.getuid?.() ?? 0}`);
+    // and the shell creates the file a moment before it writes the line: wait for a
+    // line, not for the file, up to a second.
+    const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : []);
     const starts = async (): Promise<string[]> => {
-      for (let i = 0; i < 40 && existsSync(marker) && !existsSync(log); i++) await Bun.sleep(50);
-      return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
+      for (let i = 0; i < 20 && lines().length === 0; i++) await Bun.sleep(50);
+      return lines();
     };
-    return { env, starts };
+    return { env, starts, file: join(home, ".claude", "zapara", "status.json") };
   };
   // A file as zapara writes it, with asOf this many milliseconds ago.
   const statusAt = (ago: number, over: Record<string, unknown> = {}) => ({
@@ -643,32 +648,49 @@ describe("pult", () => {
     expect(out.trim()).toBe("Opus │ load - · streak 2h46 · day 9h15");
   });
 
-  test("starts zapara once for a stale file and keeps printing the old value dimmed", async () => {
+  test("starts zapara on every render while the file is stale, and prints the old value dimmed", async () => {
     const z = zapara(statusAt(6 * 60_000));
     const first = await render(opus, z.env, ["--zapara"]);
     expect(first.code).toBe(0);
     // Stale, so every part is dim, the red streak and day included.
     expect(first.raw).toContain("\x1b[2mload 36\x1b[0m\x1b[2m · \x1b[0m\x1b[2mstreak 2h46\x1b[0m\x1b[2m · \x1b[0m\x1b[2mday 9h15\x1b[0m");
-    // The file is still stale on the next render, and the marker says a start is pending.
+    expect(await z.starts()).toEqual(["status"]);
+    // Still stale on the next render: another start, no throttle to get wrong.
     const second = await render(opus, z.env, ["--zapara"]);
     expect(second.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
-    expect(await z.starts()).toEqual(["status"]);
+    expect(await z.starts()).toEqual(["status", "status"]);
+    // The fresh file zapara writes is what ends the starts.
+    writeFileSync(z.file, JSON.stringify(statusAt(0)) + "\n");
+    const third = await render(opus, z.env, ["--zapara"]);
+    expect(third.out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual(["status", "status"]);
   });
 
-  // Two Claude Code sessions share the marker, and a render can overlap the one it
-  // replaces, so the marker is claimed atomically: once when it is missing, once when
-  // it has expired, and four renders at once start zapara exactly once each time.
-  test("starts zapara once when four renders arrive at once, marker missing or expired", async () => {
+  test("starts nothing when zapara is not on PATH, and still prints what it has", async () => {
     const z = zapara(statusAt(6 * 60_000));
-    const marker = join(z.env.HOME, `pult-zapara-${process.getuid?.() ?? 0}`);
-    const four = () => Promise.all([1, 2, 3, 4].map(() => render(opus, z.env, ["--zapara"])));
-    for (const r of await four()) expect(r.code).toBe(0);
-    expect(await z.starts()).toEqual(["status"]);
-    // Age the marker past the interval; every render now sees an expired one.
-    const old = new Date(Date.now() - 6 * 60_000);
-    utimesSync(marker, old, old);
-    rmSync(join(z.env.HOME, "starts"));
-    for (const r of await four()) expect(r.code).toBe(0);
+    // An empty directory as the whole PATH: bun is run by absolute path, so nothing else is needed.
+    const { out, code } = await render(opus, { ...z.env, PATH: temp("pult-empty-path-") }, ["--zapara"]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
+    expect(await z.starts()).toEqual([]);
+  });
+
+  // The wrapper is where PATH is made: a global install lands in Bun's global bin dir,
+  // wherever the bun the wrapper found lives (Homebrew's, here).
+  test("the wrapper finds a zapara in Bun's global bin dir", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const root = temp("pult-sysroot-bun-");
+    mkdirSync(join(root, "usr", "local", "bin"), { recursive: true });
+    symlinkSync(process.execPath, join(root, "usr", "local", "bin", "bun"));
+    const globalBin = join(z.env.HOME, ".bun", "bin");
+    mkdirSync(globalBin, { recursive: true });
+    symlinkSync(join(fakeBin!, "zapara"), join(globalBin, "zapara"));
+    const proc = Bun.spawn([wrapper, "--zapara"], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { HOME: z.env.HOME, PATH: "/usr/bin:/bin", PULT_SYSROOT: root, PULT_TEST_LOG: z.env.PULT_TEST_LOG } });
+    proc.stdin.write(JSON.stringify(opus));
+    proc.stdin.end();
+    const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
+    expect(await proc.exited).toBe(0);
+    expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
     expect(await z.starts()).toEqual(["status"]);
   });
 
