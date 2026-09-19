@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -192,6 +192,8 @@ const decodeLoad = (raw: unknown, now: number): Load | null => {
     asOf <= now + 60_000 &&
     typeof s.date === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(s.date) &&
+    // A real calendar day: 2026-02-31 parses, as March 3rd, and does not round-trip.
+    new Date(`${s.date}T00:00:00Z`).toISOString().slice(0, 10) === s.date &&
     int(s.hour, 23) !== null &&
     (index === null) === (s.index === null) &&
     level !== undefined &&
@@ -216,19 +218,46 @@ const readLoad = (home: string, now: number): Load | null => {
 // process waits a few milliseconds for the shell and never for zapara, and zapara is
 // reparented to init with no handle left in this process: Bun.spawn with `detached` and
 // `unref()` was tried first, and a child started that way died when this process exited
-// before the child had finished starting. A marker in the temp dir is the single flight: a zapara that is
-// missing, broken or slow costs one start per interval, never one per render. When the
-// marker cannot be written there is no throttle, so nothing is started.
-const refreshLoad = (home: string, now: number): void => {
-  const marker = join(tmpdir(), `pult-zapara-${process.getuid?.() ?? 0}`);
+// before the child had finished starting. A marker in the temp dir is the single flight: a
+// zapara that is missing, broken or slow costs one start per interval, never one per
+// render. When the marker cannot be written there is no throttle, so nothing is started.
+//
+// Two renders can overlap (two Claude Code sessions share the temp dir, and a render is
+// killed rather than waited for when the next one is due), so the marker is claimed, not
+// checked and then written. A missing marker is created exclusively, and one create wins.
+// An expired marker is renamed away first, and one rename wins; the winner then creates
+// the new marker exclusively too, and if another render slipped its own in between, that
+// render is the one starting zapara, so this one does not.
+const claimStart = (marker: string, now: number): boolean => {
+  const create = (): boolean => {
+    try {
+      closeSync(openSync(marker, "wx"));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let mtime: number;
   try {
-    if (now - statSync(marker).mtimeMs < LOAD_STALE_MS) return;
-  } catch {}
-  try {
-    writeFileSync(marker, "");
+    mtime = statSync(marker).mtimeMs;
   } catch {
-    return;
+    return create();
   }
+  if (now - mtime < LOAD_STALE_MS) return false;
+  const claimed = `${marker}.${process.pid}`;
+  try {
+    renameSync(marker, claimed);
+  } catch {
+    return false;
+  }
+  try {
+    unlinkSync(claimed);
+  } catch {}
+  return create();
+};
+
+const refreshLoad = (home: string, now: number): void => {
+  if (!claimStart(join(tmpdir(), `pult-zapara-${process.getuid?.() ?? 0}`), now)) return;
   // A status line runs outside any shell profile, so PATH may lack the bun that is
   // running this script, and a globally installed zapara lives beside that bun.
   const zapara = Bun.which("zapara", { PATH: `${process.env.PATH ?? ""}:${dirname(process.execPath)}` });

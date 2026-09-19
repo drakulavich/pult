@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -629,6 +629,23 @@ describe("pult", () => {
     expect(await z.starts()).toEqual(["status"]);
   });
 
+  // Two Claude Code sessions share the marker, and a render can overlap the one it
+  // replaces, so the marker is claimed atomically: once when it is missing, once when
+  // it has expired, and four renders at once start zapara exactly once each time.
+  test("starts zapara once when four renders arrive at once, marker missing or expired", async () => {
+    const z = zapara(statusAt(6 * 60_000));
+    const marker = join(z.env.HOME, `pult-zapara-${process.getuid?.() ?? 0}`);
+    const four = () => Promise.all([1, 2, 3, 4].map(() => render(opus, z.env, ["--zapara"])));
+    for (const r of await four()) expect(r.code).toBe(0);
+    expect(await z.starts()).toEqual(["status"]);
+    // Age the marker past the interval; every render now sees an expired one.
+    const old = new Date(Date.now() - 6 * 60_000);
+    utimesSync(marker, old, old);
+    rmSync(join(z.env.HOME, "starts"));
+    for (const r of await four()) expect(r.code).toBe(0);
+    expect(await z.starts()).toEqual(["status"]);
+  });
+
   test("starts zapara for a missing file and prints no segment", async () => {
     const z = zapara(null);
     const { out, code } = await render(opus, z.env, ["--zapara"]);
@@ -646,6 +663,8 @@ describe("pult", () => {
       statusAt(0, { level: "Hot" }),
       statusAt(0, { index: null }),
       statusAt(0, { hour: 24 }),
+      statusAt(0, { date: "2026-02-31" }),
+      statusAt(0, { date: "2026-13-01" }),
       statusAt(0, { streakMin: -1 }),
       statusAt(0, { peak: undefined }),
       statusAt(-2 * 60_000),
