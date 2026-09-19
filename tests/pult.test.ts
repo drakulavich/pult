@@ -668,20 +668,24 @@ describe("pult", () => {
 
   test("starts nothing when zapara is not on PATH, and still prints what it has", async () => {
     const z = zapara(statusAt(6 * 60_000));
-    const { out, code } = await render(opus, { ...z.env, PATH: "/usr/bin:/bin" }, ["--zapara"]);
+    // An empty directory as the whole PATH: bun is run by absolute path, so nothing else is needed.
+    const { out, code } = await render(opus, { ...z.env, PATH: temp("pult-empty-path-") }, ["--zapara"]);
     expect(code).toBe(0);
     expect(out.trim()).toBe("Opus │ load 36 · streak 2h46 · day 9h15");
     expect(await z.starts()).toEqual([]);
   });
 
-  // The wrapper is where PATH is made: a global install puts zapara beside bun.
-  test("the wrapper finds a zapara beside the bun it found", async () => {
+  // The wrapper is where PATH is made: a global install lands in Bun's global bin dir,
+  // wherever the bun the wrapper found lives (Homebrew's, here).
+  test("the wrapper finds a zapara in Bun's global bin dir", async () => {
     const z = zapara(statusAt(6 * 60_000));
-    const bin = join(z.env.HOME, ".bun", "bin");
-    mkdirSync(bin, { recursive: true });
-    symlinkSync(process.execPath, join(bin, "bun"));
-    symlinkSync(join(fakeBin!, "zapara"), join(bin, "zapara"));
-    const proc = Bun.spawn([wrapper, "--zapara"], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { HOME: z.env.HOME, PATH: "/usr/bin:/bin", PULT_TEST_LOG: z.env.PULT_TEST_LOG } });
+    const root = temp("pult-sysroot-bun-");
+    mkdirSync(join(root, "usr", "local", "bin"), { recursive: true });
+    symlinkSync(process.execPath, join(root, "usr", "local", "bin", "bun"));
+    const globalBin = join(z.env.HOME, ".bun", "bin");
+    mkdirSync(globalBin, { recursive: true });
+    symlinkSync(join(fakeBin!, "zapara"), join(globalBin, "zapara"));
+    const proc = Bun.spawn([wrapper, "--zapara"], { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { HOME: z.env.HOME, PATH: "/usr/bin:/bin", PULT_SYSROOT: root, PULT_TEST_LOG: z.env.PULT_TEST_LOG } });
     proc.stdin.write(JSON.stringify(opus));
     proc.stdin.end();
     const out = (await new Response(proc.stdout).text()).replace(/\x1b\[[0-9;]*m/g, "");
