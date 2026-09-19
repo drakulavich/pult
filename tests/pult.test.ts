@@ -572,13 +572,13 @@ describe("pult", () => {
     // and on macOS a freshly written script is checked for a few hundred milliseconds
     // before it first runs. The single-flight marker (one per five-minute interval) is
     // written before any start, so no marker means no start and nothing to wait for.
-    const prefix = `pult-zapara-${process.getuid?.() ?? 0}-`;
-    const claimed = () => readdirSync(home).some((n) => n.startsWith(prefix));
+    const markers = join(home, `pult-zapara-${process.getuid?.() ?? 0}`);
+    const claimed = () => existsSync(markers) && readdirSync(markers).length > 0;
     const starts = async (): Promise<string[]> => {
       for (let i = 0; i < 40 && claimed() && !existsSync(log); i++) await Bun.sleep(50);
       return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => l !== "") : [];
     };
-    return { env, starts, prefix };
+    return { env, starts, markers };
   };
   // The marker is named after the five-minute interval, so renders that straddle an
   // interval boundary claim twice for a legitimate reason; a run that crossed one is
@@ -679,15 +679,12 @@ describe("pult", () => {
       for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, empty.env, ["--zapara"])))) expect(r.code).toBe(0);
       expect(await empty.starts()).toEqual(["status"]);
       const swept = zapara(statusAt(6 * 60_000));
-      const old = join(swept.env.HOME, `${swept.prefix}${interval() - 1}`);
+      mkdirSync(swept.markers, { recursive: true });
+      const old = join(swept.markers, String(interval() - 1));
       writeFileSync(old, "");
-      // Names that share the prefix but are not markers of this implementation stay.
-      const strangers = ["", "0x10", "1e3", " 7"].map((s) => join(swept.env.HOME, `${swept.prefix}${s}`));
-      for (const f of strangers) writeFileSync(f, "");
       for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, swept.env, ["--zapara"])))) expect(r.code).toBe(0);
       expect(await swept.starts()).toEqual(["status"]);
       expect(existsSync(old)).toBe(false);
-      for (const f of strangers) expect(existsSync(f)).toBe(true);
     });
   });
 

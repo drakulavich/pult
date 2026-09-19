@@ -28,7 +28,8 @@ around it: that is how a line earns its place, or how the code earns a fix.
   not a new one, and a test counts the calls. The one exception is `--zapara`:
   `refreshLoad()` starts `zapara status` detached and unwaited, only when the
   status file is stale, missing or invalid, and at most once per five-minute
-  interval through a marker file named after the interval, created exclusively
+  interval through a marker file named after the interval, in a directory of
+  its own in the temp dir, created exclusively
   and never aged or renamed: the first scheme renamed an expired marker away and
   could steal the fresh one a faster render had just made, and CI saw two
   starts. A test counts those starts too.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Claude Code statusLine. Payload shape: https://code.claude.com/docs/en/statusline
-import { closeSync, openSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -232,24 +232,23 @@ const readLoad = (home: string, now: number): Load | null => {
 // renamed, so there is no moment at which a fresh marker can be taken for an expired
 // one. (The first scheme renamed an expired marker away and could steal the fresh one
 // that a faster render had just put in its place; CI caught it with two starts.) The
-// winner sweeps the markers of earlier intervals, so the temp dir holds one at a time.
+// markers live in a directory of their own, so the winner's sweep of earlier intervals
+// can touch nothing else, and the directory holds one marker at a time.
 const claimStart = (): boolean => {
-  const dir = tmpdir();
-  const prefix = `pult-zapara-${process.getuid?.() ?? 0}-`;
+  const dir = join(tmpdir(), `pult-zapara-${process.getuid?.() ?? 0}`);
   // The clock is read at the claim, not when the render began: a render that stalled
   // across an interval boundary would otherwise claim an interval that is already over.
   const interval = Math.floor(Date.now() / LOAD_STALE_MS);
   try {
-    closeSync(openSync(join(dir, `${prefix}${interval}`), "wx"));
+    mkdirSync(dir, { recursive: true });
+    closeSync(openSync(join(dir, String(interval)), "wx"));
   } catch {
     return false;
   }
   try {
     for (const name of readdirSync(dir)) {
-      // Only this implementation's names (a plain decimal after the prefix) and only
-      // earlier intervals, never the one that has just begun.
-      const suffix = name.slice(prefix.length);
-      if (name.startsWith(prefix) && /^(0|[1-9]\d*)$/.test(suffix) && Number(suffix) < interval) unlinkSync(join(dir, name));
+      // Only earlier intervals, never the one that has just begun.
+      if (Number(name) < interval) unlinkSync(join(dir, name));
     }
   } catch {}
   return true;
