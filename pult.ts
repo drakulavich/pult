@@ -233,10 +233,12 @@ const readLoad = (home: string, now: number): Load | null => {
 // one. (The first scheme renamed an expired marker away and could steal the fresh one
 // that a faster render had just put in its place; CI caught it with two starts.) The
 // winner sweeps the markers of earlier intervals, so the temp dir holds one at a time.
-const claimStart = (now: number): boolean => {
+const claimStart = (): boolean => {
   const dir = tmpdir();
   const prefix = `pult-zapara-${process.getuid?.() ?? 0}-`;
-  const interval = Math.floor(now / LOAD_STALE_MS);
+  // The clock is read at the claim, not when the render began: a render that stalled
+  // across an interval boundary would otherwise claim an interval that is already over.
+  const interval = Math.floor(Date.now() / LOAD_STALE_MS);
   try {
     closeSync(openSync(join(dir, `${prefix}${interval}`), "wx"));
   } catch {
@@ -244,16 +246,17 @@ const claimStart = (now: number): boolean => {
   }
   try {
     for (const name of readdirSync(dir)) {
-      // Only earlier intervals: a render whose clock read a moment earlier must not
-      // sweep the marker of the interval that has just begun.
-      if (name.startsWith(prefix) && Number(name.slice(prefix.length)) < interval) unlinkSync(join(dir, name));
+      // Only this implementation's names (a plain decimal after the prefix) and only
+      // earlier intervals, never the one that has just begun.
+      const suffix = name.slice(prefix.length);
+      if (name.startsWith(prefix) && /^(0|[1-9]\d*)$/.test(suffix) && Number(suffix) < interval) unlinkSync(join(dir, name));
     }
   } catch {}
   return true;
 };
 
 const refreshLoad = (home: string, now: number): void => {
-  if (!claimStart(now)) return;
+  if (!claimStart()) return;
   // A status line runs outside any shell profile, so PATH may lack the bun that is
   // running this script, and a globally installed zapara lives beside that bun.
   const zapara = Bun.which("zapara", { PATH: `${process.env.PATH ?? ""}:${dirname(process.execPath)}` });

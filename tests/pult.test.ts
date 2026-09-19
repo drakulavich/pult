@@ -681,9 +681,13 @@ describe("pult", () => {
       const swept = zapara(statusAt(6 * 60_000));
       const old = join(swept.env.HOME, `${swept.prefix}${interval() - 1}`);
       writeFileSync(old, "");
+      // Names that share the prefix but are not markers of this implementation stay.
+      const strangers = ["", "0x10", "1e3", " 7"].map((s) => join(swept.env.HOME, `${swept.prefix}${s}`));
+      for (const f of strangers) writeFileSync(f, "");
       for (const r of await Promise.all([1, 2, 3, 4].map(() => render(opus, swept.env, ["--zapara"])))) expect(r.code).toBe(0);
       expect(await swept.starts()).toEqual(["status"]);
       expect(existsSync(old)).toBe(false);
+      for (const f of strangers) expect(existsSync(f)).toBe(true);
     });
   });
 
