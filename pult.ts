@@ -52,8 +52,14 @@ const parse = (raw: unknown): Session => {
     return pct === null ? null : { label, pct, resets: num(w.resets_at) };
   };
 
+  // The name ends where a parenthesis begins: Claude Code writes the [1m]
+  // variant as "Opus 5 (1M context)", and the window's size is the ctx
+  // section's to show, so the line would otherwise say 1M twice.
+  const name = str(model.display_name) ?? str(model.id) ?? "?";
+  const note = name.indexOf(" (");
+
   return {
-    model: str(model.display_name) ?? str(model.id) ?? "?",
+    model: note === -1 ? name : name.slice(0, note),
     flags: [bool(p.fast_mode) ? "fast" : null, effort && effort !== "high" ? effort : null].filter((f) => f !== null),
     context: parseContext(p.context_window),
     cost: parseCost(p.cost),
