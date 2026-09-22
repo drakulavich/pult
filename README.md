@@ -113,7 +113,7 @@ Left to right, with the payload field each section comes from. The fields are do
 
 | Section | Comes from | Notes |
 |---|---|---|
-| `Fable 5.1 fast,low` | `model.display_name` | Falls back to `model.id`, then `?`. Appends `fast` and the effort level unless it is `high` |
+| `Fable 5.1 fast,low` | `model.display_name` | Falls back to `model.id`, then `?`, and stops at a parenthesis: the `[1m]` variant arrives as `Opus 5 (1M context)`, and the window's size is the `ctx` section's to show. Appends `fast` and the effort level unless it is `high` |
 | `ctx 41% of 1M` | `context_window` | Uses `used_percentage` when the payload has it, otherwise adds up `current_usage` against the window size. The size is printed, the token count is not |
 | `$4.21 · 1h30` | `cost.total_cost_usd`, `total_duration_ms` | A thousand dollars becomes `$1k`, a day becomes `1d0h`; the minutes go with it |
 | `+156/-23` | `cost.total_lines_added`, `total_lines_removed` | Thousands to a tenth from a thousand, `+11.1k/-348`; hidden when both are zero |

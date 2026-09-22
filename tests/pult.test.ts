@@ -35,6 +35,13 @@ describe("pult", () => {
     expect(out.trim()).toMatch(/^Fable 5\.1 │ ctx 41% of 1M │ \$4\.21 · 1h30 │ \+156\/-23 │ 5h 24% · 7d 81% ↻3d11h │ kesha-voice-kit(:\S+)? │ PR #1150$/);
   });
 
+  test("a note Claude Code puts in parentheses after the model name is not the name", async () => {
+    // The [1m] variant arrives as "Opus 5 (1M context)".
+    const { out } = await render({ model: { display_name: "Opus 5 (1M context)" }, context_window: { context_window_size: 1_000_000, used_percentage: 42 } });
+    expect(out).toMatch(/^Opus 5 │ ctx 42% of 1M/);
+    expect(out.match(/1M/g)).toHaveLength(1);
+  });
+
   test("leaves absent sections out instead of printing placeholders", async () => {
     const { out } = await render({ model: { display_name: "Opus" }, workspace: { current_dir: "/tmp" } });
     expect(out).toContain("Opus");
