@@ -56,10 +56,9 @@ const parse = (raw: unknown): Session => {
   // variant as "Opus 5 (1M context)", and the window's size is the ctx
   // section's to show, so the line would otherwise say 1M twice.
   const name = str(model.display_name) ?? str(model.id) ?? "?";
-  const note = name.indexOf(" (");
 
   return {
-    model: note === -1 ? name : name.slice(0, note),
+    model: name.split(" (")[0]!,
     flags: [bool(p.fast_mode) ? "fast" : null, effort && effort !== "high" ? effort : null].filter((f) => f !== null),
     context: parseContext(p.context_window),
     cost: parseCost(p.cost),

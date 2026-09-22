@@ -36,8 +36,7 @@ describe("pult", () => {
   });
 
   test("a note Claude Code puts in parentheses after the model name is not the name", async () => {
-    // The [1m] variant arrives as "Opus 5 (1M context)"; the window's size is
-    // the ctx section's to show, so the line would say 1M twice.
+    // The [1m] variant arrives as "Opus 5 (1M context)".
     const { out } = await render({ model: { display_name: "Opus 5 (1M context)" }, context_window: { context_window_size: 1_000_000, used_percentage: 42 } });
     expect(out).toMatch(/^Opus 5 │ ctx 42% of 1M/);
     expect(out.match(/1M/g)).toHaveLength(1);
